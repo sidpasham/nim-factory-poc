@@ -1,0 +1,6 @@
+# requirements.txt
+langgraph
+pydantic
+fastapi
+uvicorn
+prometheus_client

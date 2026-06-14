@@ -1,0 +1,9 @@
+.git
+.idea
+venv
+__pycache__
+*.pyc
+.pytest_cache
+test
+infra/grafana
+infra/prometheus

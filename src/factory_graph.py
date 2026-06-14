@@ -1,0 +1,100 @@
+# factory_graph.py
+from typing import TypedDict, Dict, Any
+from langgraph.graph import StateGraph, END
+from mcp_provisioning import MCPProvisioningServer
+
+
+PUBLISH_STATUS = "NIM_Ready_To_Deploy"
+FAILED_STATUS = "Failed"
+MINIMUM_TPS_THRESHOLD = 1200
+
+
+# Define the shared state schema across the factory pipeline
+class FactoryState(TypedDict):
+    model_name: str
+    target_gpu: str
+    hardware_topology: Dict[str, Any]
+    validation_results: Dict[str, Any]
+    status: str
+    error_message: str
+
+# Node 1: Discover Infrastructure via MCP
+def discover_infrastructure(state: FactoryState) -> Dict[str, Any]:
+    print(f"\n[Factory Node] Initiating hardware discovery for {state['target_gpu']}...")
+    topology = MCPProvisioningServer.query_hardware_topology(state["target_gpu"])
+    return {"hardware_topology": topology, "status": "Infrastructure_Discovered"}
+
+# Node 2: Run Automated Validation Test Harness
+def run_validation_harness(state: FactoryState) -> Dict[str, Any]:
+    print("[Factory Node] Running automated integration & performance test harness...")
+    results = MCPProvisioningServer.run_hardware_test_harness(state["hardware_topology"])
+    return {"validation_results": results, "status": "Validation_Completed"}
+
+# Node 3: Process Compilation & Deployment Failure
+def handle_failure(state: FactoryState) -> Dict[str, Any]:
+    validation_results = state.get("validation_results", {})
+    metrics = validation_results.get("metrics", {})
+    topology = state.get("hardware_topology", {})
+
+    tokens_per_second = metrics.get("tokens_per_second", 0)
+    error_rate = metrics.get("error_rate", "unknown")
+    interconnect = topology.get("interconnect", "unknown")
+
+    if not validation_results.get("success"):
+        failure_reason = "hardware validation harness reported an unsuccessful run"
+    else:
+        failure_reason = (
+            f"throughput {tokens_per_second} TPS did not exceed "
+            f"the {MINIMUM_TPS_THRESHOLD} TPS threshold"
+        )
+
+    error_message = (
+        f"{failure_reason} for model {state['model_name']} on {state['target_gpu']} "
+        f"({interconnect}; error_rate={error_rate})."
+    )
+
+    print(f"[Factory Node] Critical Alert: {error_message}")
+    return {"status": FAILED_STATUS, "error_message": error_message}
+
+# Node 4: Compile and Publish Verified NIM Service
+def compile_and_publish_nim(state: FactoryState) -> Dict[str, Any]:
+    print(f"[Factory Node] Success! Compiling NIM layer container for {state['model_name']} on {state['target_gpu']}.")
+    return {"status": PUBLISH_STATUS}
+
+# Conditional Router: Decides where to direct state based on test harness outputs
+def route_validation_results(state: FactoryState) -> str:
+    results = state.get("validation_results", {})
+    if results.get("success") and results.get("metrics", {}).get("tokens_per_second", 0) > MINIMUM_TPS_THRESHOLD:
+        return "publish"
+    return "fail"
+
+# Building the workflow graph
+workflow = StateGraph(FactoryState)
+
+# Add Nodes
+workflow.add_node("discover_infrastructure", discover_infrastructure)
+workflow.add_node("run_validation_harness", run_validation_harness)
+workflow.add_node("handle_failure", handle_failure)
+workflow.add_node("compile_and_publish_nim", compile_and_publish_nim)
+
+# Establish Entrypoint
+workflow.set_entry_point("discover_infrastructure")
+
+# Define Edges
+workflow.add_edge("discover_infrastructure", "run_validation_harness")
+
+# Conditional Routing Edge
+workflow.add_conditional_edges(
+    "run_validation_harness",
+    route_validation_results,
+    {
+        "publish": "compile_and_publish_nim",
+        "fail": "handle_failure"
+    }
+)
+
+workflow.add_edge("compile_and_publish_nim", END)
+workflow.add_edge("handle_failure", END)
+
+# Compile the execution graph
+nim_factory_graph_pipeline = workflow.compile()

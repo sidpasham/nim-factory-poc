@@ -1,0 +1,44 @@
+{
+  "default_success_rate": 0.85,
+  "default_profile": {
+    "success_rate": 0.85,
+    "tokens_per_second": {
+      "min": 1000,
+      "max": 1500
+    },
+    "latency_ms": {
+      "min": 12.5,
+      "max": 24.0
+    },
+    "success_error_rate": 0.0,
+    "failure_error_rate": 0.12
+  },
+  "profiles": {
+    "NVLink": {
+      "success_rate": 0.85,
+      "tokens_per_second": {
+        "min": 2500,
+        "max": 3000
+      },
+      "latency_ms": {
+        "min": 12.5,
+        "max": 24.0
+      },
+      "success_error_rate": 0.0,
+      "failure_error_rate": 0.12
+    },
+    "PCIe": {
+      "success_rate": 0.85,
+      "tokens_per_second": {
+        "min": 1000,
+        "max": 1500
+      },
+      "latency_ms": {
+        "min": 12.5,
+        "max": 24.0
+      },
+      "success_error_rate": 0.0,
+      "failure_error_rate": 0.12
+    }
+  }
+}

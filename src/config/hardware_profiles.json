@@ -1,0 +1,36 @@
+{
+  "default_profile": {
+    "interconnect": "PCIe",
+    "pcie_generation": "Gen4",
+    "smartnic_active": false,
+    "optimized_driver": "v540_generic"
+  },
+  "profiles": [
+    {
+      "name": "nvidia-nvlink-gb-series",
+      "match_any": [
+        "GB200",
+        "GB300",
+        "B300"
+      ],
+      "topology": {
+        "interconnect": "NVLink",
+        "pcie_generation": "Gen5",
+        "smartnic_active": true,
+        "optimized_driver": "v550_prod"
+      }
+    },
+    {
+      "name": "amd-mi355x-pcie",
+      "match_any": [
+        "MI355X"
+      ],
+      "topology": {
+        "interconnect": "PCIe",
+        "pcie_generation": "Gen4",
+        "smartnic_active": false,
+        "optimized_driver": "v540_generic"
+      }
+    }
+  ]
+}
