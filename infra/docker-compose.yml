@@ -9,6 +9,10 @@ services:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
+      - NIM_MINIMUM_TPS_THRESHOLD=${NIM_MINIMUM_TPS_THRESHOLD:-100}
+      - NIM_BASE_URL=${NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - NIM_TIMEOUT_SECONDS=${NIM_TIMEOUT_SECONDS:-30}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
       interval: 10s

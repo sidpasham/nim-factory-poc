@@ -1,0 +1,64 @@
+{
+  "profiles": [
+    {
+      "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "benchmark_prompt": "Briefly describe why GPU-aware inference validation matters for deploying large language models.",
+      "max_tokens": 256,
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "stream": false,
+      "extra_body": {
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        },
+        "reasoning_budget": 16384
+      }
+    },
+    {
+      "model": "minimaxai/minimax-m3",
+      "benchmark_prompt": "Briefly describe why GPU-aware inference validation matters for deploying large language models.",
+      "max_tokens": 512,
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "stream": false
+    },
+    {
+      "model": "deepseek-ai/deepseek-v4-flash",
+      "benchmark_prompt": "Briefly describe why GPU-aware inference validation matters for deploying large language models.",
+      "max_tokens": 512,
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "stream": false,
+      "extra_body": {
+        "chat_template_kwargs": {
+          "thinking": true,
+          "reasoning_effort": "high"
+        }
+      }
+    },
+    {
+      "model": "z-ai/glm-5.1",
+      "benchmark_prompt": "Briefly describe why GPU-aware inference validation matters for deploying large language models.",
+      "max_tokens": 16384,
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "stream": true
+    },
+    {
+      "model": "meta/llama-3.1-8b-instruct",
+      "benchmark_prompt": "Briefly describe why GPU-aware inference validation matters for deploying large language models.",
+      "max_tokens": 1024,
+      "temperature": 0.2,
+      "top_p": 0.7,
+      "stream": false
+    },
+    {
+      "model": "minimaxai/minimax-m2.7",
+      "benchmark_prompt": "Briefly describe why GPU-aware inference validation matters for deploying large language models.",
+      "max_tokens": 8192,
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "stream": false
+    }
+  ]
+}

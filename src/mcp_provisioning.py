@@ -1,13 +1,19 @@
 from functools import lru_cache
 import json
-import random
 from pathlib import Path
 from typing import Any, Dict
+
+from nim_runtime_client import NIMRuntimeClient
 
 
 CONFIG_DIR = Path(__file__).resolve().parent / "config"
 HARDWARE_PROFILES_PATH = CONFIG_DIR / "hardware_profiles.json"
-VALIDATION_PROFILES_PATH = CONFIG_DIR / "validation_profiles.json"
+DEPLOYMENT_TARGETS_PATH = CONFIG_DIR / "deployment_targets.json"
+NIM_VALIDATION_SOURCE = "nvidia_hosted_nim"
+
+
+class UnsupportedProvisioningTargetError(ValueError):
+    """Raised when a requested hardware or deployment target is not configured."""
 
 
 def _load_json_config(path: Path) -> Dict[str, Any]:
@@ -21,12 +27,28 @@ def _hardware_profiles() -> Dict[str, Any]:
 
 
 @lru_cache(maxsize=1)
-def _validation_profiles() -> Dict[str, Any]:
-    return _load_json_config(VALIDATION_PROFILES_PATH)
+def _deployment_targets() -> Dict[str, Any]:
+    return _load_json_config(DEPLOYMENT_TARGETS_PATH)
 
 
 class MCPProvisioningServer:
-    """Simulates an MCP Server exposing hardware provisioning and platform APIs."""
+    """Config-backed provisioning facade for hardware topology and NIM validation."""
+
+    @staticmethod
+    def _supported_hardware_targets(profiles_config: Dict[str, Any]) -> str:
+        targets = [
+            profile.get("topology", {}).get("accelerator", profile.get("name", "unknown"))
+            for profile in profiles_config.get("profiles", [])
+        ]
+        return ", ".join(sorted(set(targets)))
+
+    @staticmethod
+    def _supported_deployment_targets(targets_config: Dict[str, Any]) -> str:
+        targets = [
+            target.get("target", {}).get("environment", target.get("name", "unknown"))
+            for target in targets_config.get("targets", [])
+        ]
+        return ", ".join(sorted(set(targets)))
 
     @staticmethod
     def query_hardware_topology(target_gpu: str) -> dict:
@@ -39,36 +61,72 @@ class MCPProvisioningServer:
             if any(term.upper() in target_gpu_normalized for term in match_terms):
                 return dict(profile["topology"])
 
-        return dict(profiles_config["default_profile"])
-
-    @staticmethod
-    def run_hardware_test_harness(topology: dict) -> dict:
-        """Runs config-backed validation harness simulation against the environment."""
-        validation_config = _validation_profiles()
-        interconnect = topology.get("interconnect", "default")
-        profile = validation_config.get("profiles", {}).get(
-            interconnect,
-            validation_config.get("default_profile", {})
+        supported_targets = MCPProvisioningServer._supported_hardware_targets(
+            profiles_config
+        )
+        raise UnsupportedProvisioningTargetError(
+            f"unsupported target_gpu '{target_gpu}'. "
+            f"Supported hardware targets: {supported_targets}"
         )
 
-        success_rate = profile.get("success_rate", validation_config.get("default_success_rate", 0.85))
-        is_successful = random.random() < success_rate
-        throughput_range = profile.get("tokens_per_second", {"min": 1000, "max": 1500})
-        latency_range = profile.get("latency_ms", {"min": 12.5, "max": 24.0})
+    @staticmethod
+    def query_deployment_target(target_environment: str) -> dict:
+        """Returns deployment target metadata for cloud, on-prem, or Kubernetes demos."""
+        targets_config = _deployment_targets()
+        target_environment_normalized = target_environment.upper()
 
-        return {
-            "success": is_successful,
-            "metrics": {
-                "tokens_per_second": random.randint(
-                    throughput_range["min"],
-                    throughput_range["max"]
-                ),
-                "error_rate": profile.get("success_error_rate", 0.0)
-                if is_successful
-                else profile.get("failure_error_rate", 0.12),
-                "latency_ms": random.uniform(
-                    latency_range["min"],
-                    latency_range["max"]
-                )
+        for target in targets_config.get("targets", []):
+            match_terms = target.get("match_any", [])
+            if any(term.upper() in target_environment_normalized for term in match_terms):
+                return dict(target["target"])
+
+        supported_targets = MCPProvisioningServer._supported_deployment_targets(
+            targets_config
+        )
+        raise UnsupportedProvisioningTargetError(
+            f"unsupported target_environment '{target_environment}'. "
+            f"Supported deployment targets: {supported_targets}"
+        )
+
+    @staticmethod
+    def run_hardware_test_harness(topology: dict, model_name: str = "") -> dict:
+        """Runs validation against the configured real NIM-compatible endpoint."""
+        return MCPProvisioningServer._run_nvidia_hosted_nim_validation(
+            model_name,
+            topology,
+        )
+
+    @staticmethod
+    def _run_nvidia_hosted_nim_validation(model_name: str, topology: dict) -> dict:
+        if not model_name:
+            return {
+                "success": False,
+                "backend": NIM_VALIDATION_SOURCE,
+                "error_message": "model_name is required for remote NIM validation",
+                "metrics": {
+                    "tokens_per_second": 0,
+                    "error_rate": 1.0,
+                    "latency_ms": 0,
+                    "output_tokens": 0,
+                },
+                "target_topology": topology,
             }
-        }
+
+        try:
+            with NIMRuntimeClient.from_env() as client:
+                result = client.validate_model(model_name)
+                result["target_topology"] = topology
+                return result
+        except Exception as exc:
+            return {
+                "success": False,
+                "backend": NIM_VALIDATION_SOURCE,
+                "error_message": f"remote NIM validation failed: {exc}",
+                "metrics": {
+                    "tokens_per_second": 0,
+                    "error_rate": 1.0,
+                    "latency_ms": 0,
+                    "output_tokens": 0,
+                },
+                "target_topology": topology,
+            }

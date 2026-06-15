@@ -1,35 +1,78 @@
 {
-  "default_profile": {
-    "interconnect": "PCIe",
-    "pcie_generation": "Gen4",
-    "smartnic_active": false,
-    "optimized_driver": "v540_generic"
-  },
   "profiles": [
     {
-      "name": "nvidia-nvlink-gb-series",
+      "name": "nvidia-gb200",
       "match_any": [
-        "GB200",
-        "GB300",
-        "B300"
+        "NVIDIA GB200",
+        "NVIDIA-GB200",
+        "GB200"
       ],
       "topology": {
+        "accelerator": "NVIDIA GB200",
         "interconnect": "NVLink",
         "pcie_generation": "Gen5",
         "smartnic_active": true,
-        "optimized_driver": "v550_prod"
+        "optimized_driver": "nvidia_datacenter_blackwell"
+      }
+    },
+    {
+      "name": "nvidia-gb300",
+      "match_any": [
+        "NVIDIA GB300",
+        "NVIDIA-GB300",
+        "GB300"
+      ],
+      "topology": {
+        "accelerator": "NVIDIA GB300",
+        "interconnect": "NVLink",
+        "pcie_generation": "Gen5",
+        "smartnic_active": true,
+        "optimized_driver": "nvidia_datacenter_blackwell"
+      }
+    },
+    {
+      "name": "nvidia-b200",
+      "match_any": [
+        "NVIDIA B200",
+        "NVIDIA-B200",
+        "B200"
+      ],
+      "topology": {
+        "accelerator": "NVIDIA B200",
+        "interconnect": "NVLink",
+        "pcie_generation": "Gen5",
+        "smartnic_active": true,
+        "optimized_driver": "nvidia_datacenter_blackwell"
       }
     },
     {
       "name": "amd-mi355x-pcie",
       "match_any": [
+        "AMD MI355X",
+        "AMD-MI355X",
         "MI355X"
       ],
       "topology": {
-        "interconnect": "PCIe",
-        "pcie_generation": "Gen4",
+        "accelerator": "AMD MI355X",
+        "interconnect": "Infinity Fabric",
+        "pcie_generation": "Gen5",
         "smartnic_active": false,
-        "optimized_driver": "v540_generic"
+        "optimized_driver": "rocm_datacenter"
+      }
+    },
+    {
+      "name": "amd-mi455x-pcie",
+      "match_any": [
+        "AMD MI455X",
+        "AMD-MI455X",
+        "MI455X"
+      ],
+      "topology": {
+        "accelerator": "AMD MI455X",
+        "interconnect": "Infinity Fabric",
+        "pcie_generation": "Gen5",
+        "smartnic_active": false,
+        "optimized_driver": "rocm_datacenter"
       }
     }
   ]

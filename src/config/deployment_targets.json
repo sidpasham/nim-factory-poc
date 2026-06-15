@@ -1,0 +1,63 @@
+{
+  "targets": [
+    {
+      "name": "cloud",
+      "match_any": [
+        "CLOUD",
+        "OCI",
+        "OKE"
+      ],
+      "target": {
+        "environment": "cloud",
+        "platform": "OCI OKE target profile",
+        "control_plane": "managed Kubernetes",
+        "nim_endpoint_mode": "nvidia_hosted_external",
+        "validation_scope": [
+          "cloud deployment target metadata",
+          "factory calls NVIDIA hosted NIM API",
+          "Prometheus labels run as cloud target"
+        ]
+      }
+    },
+    {
+      "name": "on-prem",
+      "match_any": [
+        "ON-PREM",
+        "ON_PREM",
+        "ONPREM",
+        "DATACENTER"
+      ],
+      "target": {
+        "environment": "on-prem",
+        "platform": "on-prem Kubernetes target profile",
+        "control_plane": "self-managed Kubernetes",
+        "nim_endpoint_mode": "nvidia_hosted_external",
+        "validation_scope": [
+          "on-prem deployment target metadata",
+          "factory calls NVIDIA hosted NIM API",
+          "Prometheus labels run as on-prem target"
+        ]
+      }
+    },
+    {
+      "name": "kubernetes",
+      "match_any": [
+        "KUBERNETES",
+        "K8S",
+        "RANCHER",
+        "RANCHER-DESKTOP"
+      ],
+      "target": {
+        "environment": "kubernetes",
+        "platform": "Rancher Desktop k3s",
+        "control_plane": "local Kubernetes",
+        "nim_endpoint_mode": "nvidia_hosted_external",
+        "validation_scope": [
+          "factory workload runs as a Kubernetes service",
+          "factory calls NVIDIA hosted NIM API",
+          "Prometheus scrapes factory metrics"
+        ]
+      }
+    }
+  ]
+}

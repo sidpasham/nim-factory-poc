@@ -5,6 +5,7 @@ import uvicorn
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from fastapi.responses import Response
 from factory_graph import PUBLISH_STATUS, nim_factory_graph_pipeline
+from mcp_provisioning import UnsupportedProvisioningTargetError
 
 app = FastAPI(title="NIM Automation Factory Control Plane")
 
@@ -12,18 +13,25 @@ app = FastAPI(title="NIM Automation Factory Control Plane")
 FACTORY_PIPELINE_RUNS = Counter(
     "nim_factory_pipeline_runs_total",
     "Total number of executions handled by the NIM model-to-service factory.",
-    ["model_name", "target_gpu", "status"]
+    ["model_name", "target_gpu", "target_environment", "status"]
 )
 INFERENCE_THROUGHPUT_GAUGE = Histogram(
     "nim_factory_validated_throughput_tps",
     "Tokens per second metrics captured during automated validation phases.",
-    ["model_name", "target_gpu", "status"],
+    ["model_name", "target_gpu", "target_environment", "status"],
     buckets=[500, 1000, 1500, 2000, 2500, 3000, 3500]
+)
+INFERENCE_LATENCY_GAUGE = Histogram(
+    "nim_factory_validated_latency_ms",
+    "End-to-end validation latency in milliseconds captured during automated validation phases.",
+    ["model_name", "target_gpu", "target_environment", "status"],
+    buckets=[100, 250, 500, 1000, 2000, 5000, 10000, 30000, 60000]
 )
 
 class ModelIngestRequest(BaseModel):
     model_name: str
-    target_gpu: str  # e.g., "NVIDIA-GB200", "NVIDIA-B300", "AMD-MI355X"
+    target_gpu: str  # e.g., "NVIDIA GB200", "NVIDIA GB300", "NVIDIA B200", "AMD MI355X"
+    target_environment: str = "kubernetes"  # e.g., "cloud", "on-prem", "kubernetes"
 
 @app.get("/metrics")
 def get_system_metrics():
@@ -43,7 +51,9 @@ def trigger_factory_pipeline(request: ModelIngestRequest):
     initial_state = {
         "model_name": request.model_name,
         "target_gpu": request.target_gpu,
+        "target_environment": request.target_environment,
         "hardware_topology": {},
+        "deployment_target": {},
         "validation_results": {},
         "status": "Ingested",
         "error_message": ""
@@ -57,7 +67,8 @@ def trigger_factory_pipeline(request: ModelIngestRequest):
         status_outcome = final_output.get("status", "Unknown")
         FACTORY_PIPELINE_RUNS.labels(
             model_name=request.model_name, 
-            target_gpu=request.target_gpu, 
+            target_gpu=request.target_gpu,
+            target_environment=request.target_environment,
             status=status_outcome
         ).inc()
         
@@ -66,14 +77,26 @@ def trigger_factory_pipeline(request: ModelIngestRequest):
             INFERENCE_THROUGHPUT_GAUGE.labels(
                 model_name=request.model_name,
                 target_gpu=request.target_gpu,
+                target_environment=request.target_environment,
                 status=status_outcome
             ).observe(tps_metric)
+
+        latency_metric = final_output.get("validation_results", {}).get("metrics", {}).get("latency_ms", 0)
+        if latency_metric > 0:
+            INFERENCE_LATENCY_GAUGE.labels(
+                model_name=request.model_name,
+                target_gpu=request.target_gpu,
+                target_environment=request.target_environment,
+                status=status_outcome
+            ).observe(latency_metric)
         return {
             "message": "Factory workflow iteration finalized.",
             "pipeline_summary": {
                 "model": final_output["model_name"],
                 "hardware": final_output["target_gpu"],
+                "environment": final_output["target_environment"],
                 "topology_used": final_output["hardware_topology"],
+                "deployment_target": final_output["deployment_target"],
                 "test_metrics": final_output["validation_results"].get("metrics", {}),
                 "final_status": status_outcome,
                 "deployable": status_outcome == PUBLISH_STATUS,
@@ -81,6 +104,8 @@ def trigger_factory_pipeline(request: ModelIngestRequest):
             }
         }
     except Exception as e:
+        if isinstance(e, UnsupportedProvisioningTargetError):
+            raise HTTPException(status_code=400, detail=str(e))
         raise HTTPException(status_code=500, detail=f"Factory Pipeline failure: {str(e)}")
 
 if __name__ == "__main__":
