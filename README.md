@@ -23,6 +23,9 @@ running locally through Docker Compose or Rancher Desktop Kubernetes.
 - Helm chart for Rancher Desktop or another Kubernetes cluster.
 - Unit tests for routing, failure handling, and provisioning behavior.
 
+## Example Dashboard
+<img width="1545" height="840" alt="image" src="https://github.com/user-attachments/assets/e74417ff-1d35-46d8-9015-6091c3cd4177" />
+
 ## Architecture
 
 ```text
