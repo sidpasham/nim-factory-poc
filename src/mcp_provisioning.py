@@ -1,15 +1,25 @@
 from functools import lru_cache
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict
 
 from nim_runtime_client import NIMRuntimeClient
+from validation_matrix import (
+    ValidationMatrixError,
+    evaluate_hardware_fit as matrix_evaluate_hardware_fit,
+    normalize_precision_mode,
+    simulate_benchmark,
+)
 
 
 CONFIG_DIR = Path(__file__).resolve().parent / "config"
 HARDWARE_PROFILES_PATH = CONFIG_DIR / "hardware_profiles.json"
 DEPLOYMENT_TARGETS_PATH = CONFIG_DIR / "deployment_targets.json"
 NIM_VALIDATION_SOURCE = "nvidia_hosted_nim"
+VALIDATION_MATRIX_SOURCE = "validation_matrix"
+VALIDATION_MODE_ENV = "MODEL_FACTORY_VALIDATION_MODE"
+DEFAULT_VALIDATION_MODE = "validation"
 
 
 class UnsupportedProvisioningTargetError(ValueError):
@@ -32,7 +42,7 @@ def _deployment_targets() -> Dict[str, Any]:
 
 
 class MCPProvisioningServer:
-    """Config-backed provisioning facade for hardware topology and NIM validation."""
+    """Config-backed provisioning facade for hardware topology and hosted NIM validation."""
 
     @staticmethod
     def _supported_hardware_targets(profiles_config: Dict[str, Any]) -> str:
@@ -71,7 +81,7 @@ class MCPProvisioningServer:
 
     @staticmethod
     def query_deployment_target(target_environment: str) -> dict:
-        """Returns deployment target metadata for cloud, on-prem, or Kubernetes demos."""
+        """Returns deployment target metadata for cloud, on-prem, or Kubernetes."""
         targets_config = _deployment_targets()
         target_environment_normalized = target_environment.upper()
 
@@ -89,12 +99,106 @@ class MCPProvisioningServer:
         )
 
     @staticmethod
-    def run_hardware_test_harness(topology: dict, model_name: str = "") -> dict:
-        """Runs validation against the configured real NIM-compatible endpoint."""
-        return MCPProvisioningServer._run_nvidia_hosted_nim_validation(
-            model_name,
-            topology,
+    def evaluate_hardware_fit(
+        topology: dict,
+        model_name: str,
+        target_gpu: str,
+        precision_mode: str = "FP16",
+    ) -> dict:
+        """Runs deterministic validation-matrix VRAM fit before benchmark/deploy."""
+        return matrix_evaluate_hardware_fit(
+            model_name=model_name,
+            target_gpu=target_gpu,
+            topology=topology,
+            precision_mode=precision_mode,
         )
+
+    @staticmethod
+    def run_hardware_test_harness(
+        topology: dict,
+        model_name: str = "",
+        target_gpu: str = "",
+        precision_mode: str = "FP16",
+        compile_result: dict | None = None,
+    ) -> dict:
+        """Runs benchmark validation in validation-matrix mode by default, hosted mode by opt-in."""
+        validation_mode = os.getenv(
+            VALIDATION_MODE_ENV,
+            DEFAULT_VALIDATION_MODE,
+        ).strip().lower()
+        normalized_precision = normalize_precision_mode(precision_mode)
+
+        if validation_mode == "hosted":
+            return MCPProvisioningServer._run_nvidia_hosted_nim_validation(
+                model_name,
+                topology,
+            )
+
+        if validation_mode != "validation":
+            return {
+                "success": False,
+                "backend": VALIDATION_MATRIX_SOURCE,
+                "error_message": (
+                    f"unsupported {VALIDATION_MODE_ENV} '{validation_mode}'. "
+                    "Supported values: validation, hosted"
+                ),
+                "metrics": {
+                    "tokens_per_second": 0,
+                    "error_rate": 1.0,
+                    "latency_ms": 0,
+                    "output_tokens": 0,
+                },
+                "target_topology": topology,
+            }
+
+        if not model_name:
+            return {
+                "success": False,
+                "backend": VALIDATION_MATRIX_SOURCE,
+                "error_message": "model_name is required for validation matrix",
+                "metrics": {
+                    "tokens_per_second": 0,
+                    "error_rate": 1.0,
+                    "latency_ms": 0,
+                    "output_tokens": 0,
+                },
+                "target_topology": topology,
+            }
+
+        try:
+            compiled = compile_result or MCPProvisioningServer.evaluate_hardware_fit(
+                topology=topology,
+                model_name=model_name,
+                target_gpu=target_gpu or topology.get("accelerator", "unknown"),
+                precision_mode=normalized_precision,
+            )
+            result = simulate_benchmark(
+                model_name=model_name,
+                target_gpu=target_gpu or topology.get("accelerator", "unknown"),
+                topology=topology,
+                precision_mode=normalized_precision,
+                compile_result=compiled,
+            )
+            result["target_topology"] = topology
+            return result
+        except ValidationMatrixError as exc:
+            result = exc.to_result()
+            return {
+                "success": False,
+                "backend": VALIDATION_MATRIX_SOURCE,
+                "error_code": result.get("error_code"),
+                "stage": result.get("stage"),
+                "reason": result.get("reason"),
+                "error_message": result.get("error_message"),
+                "metrics": {
+                    "tokens_per_second": 0,
+                    "error_rate": 1.0,
+                    "latency_ms": 0,
+                    "output_tokens": 0,
+                },
+                "validation_matrix": result,
+                "target_topology": topology,
+            }
 
     @staticmethod
     def _run_nvidia_hosted_nim_validation(model_name: str, topology: dict) -> dict:

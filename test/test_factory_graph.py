@@ -7,7 +7,11 @@ from unittest.mock import patch
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-from factory_graph import handle_failure, route_validation_results  # noqa: E402
+from factory_graph import (  # noqa: E402
+    handle_failure,
+    model_factory_graph_pipeline,
+    route_validation_results,
+)
 
 
 class FactoryGraphTests(unittest.TestCase):
@@ -38,7 +42,7 @@ class FactoryGraphTests(unittest.TestCase):
         self.assertEqual(route, "fail")
 
     def test_route_validation_results_uses_configured_tps_threshold(self):
-        with patch.dict("os.environ", {"NIM_MINIMUM_TPS_THRESHOLD": "100"}, clear=True):
+        with patch.dict("os.environ", {"MODEL_FACTORY_MINIMUM_TPS_THRESHOLD": "100"}, clear=True):
             route = route_validation_results({
                 "validation_results": {
                     "success": True,
@@ -64,7 +68,7 @@ class FactoryGraphTests(unittest.TestCase):
         self.assertEqual(route, "fail")
 
     def test_handle_failure_uses_state_to_build_contextual_error_message(self):
-        with patch.dict("os.environ", {"NIM_MINIMUM_TPS_THRESHOLD": "100"}, clear=True), \
+        with patch.dict("os.environ", {"MODEL_FACTORY_MINIMUM_TPS_THRESHOLD": "100"}, clear=True), \
                 patch("builtins.print"):
             result = handle_failure({
                 "model_name": "llama-demo",
@@ -95,6 +99,55 @@ class FactoryGraphTests(unittest.TestCase):
         self.assertIn("100 TPS threshold", result["error_message"])
         self.assertIn("PCIe", result["error_message"])
         self.assertIn("error_rate=0.0", result["error_message"])
+
+    def test_pipeline_records_precision_profile_for_int4(self):
+        with patch.dict("os.environ", {"MODEL_FACTORY_MINIMUM_TPS_THRESHOLD": "1"}, clear=True):
+            result = model_factory_graph_pipeline.invoke({
+                "model_name": "Llama-3-30B",
+                "target_gpu": "H100-80GB",
+                "target_environment": "kubernetes",
+                "precision_mode": "INT4",
+                "hardware_topology": {},
+                "deployment_target": {},
+                "precision_result": {},
+                "compile_result": {},
+                "validation_results": {},
+                "stage_durations": {},
+                "status": "Ingested",
+                "error_message": "",
+            })
+
+        self.assertEqual(result["status"], "Model_Service_Ready_To_Deploy")
+        self.assertTrue(result["precision_result"]["profiled"])
+        self.assertIn("precision_profile", result["stage_durations"])
+        self.assertLess(
+            result["validation_results"]["metrics"]["required_vram_gb"],
+            result["compile_result"]["available_vram_gb"],
+        )
+
+    def test_pipeline_fails_vram_insufficient_compile(self):
+        with patch.dict("os.environ", {"MODEL_FACTORY_MINIMUM_TPS_THRESHOLD": "1"}, clear=True):
+            result = model_factory_graph_pipeline.invoke({
+                "model_name": "Llama-3-70B",
+                "target_gpu": "A10G-24GB",
+                "target_environment": "kubernetes",
+                "precision_mode": "FP16",
+                "hardware_topology": {},
+                "deployment_target": {},
+                "precision_result": {},
+                "compile_result": {},
+                "validation_results": {},
+                "stage_durations": {},
+                "status": "Ingested",
+                "error_message": "",
+            })
+
+        self.assertEqual(result["status"], "Failed")
+        self.assertEqual(
+            result["compile_result"]["error_code"],
+            "VRAM_INSUFFICIENT_EXCEPTION",
+        )
+        self.assertIn("VRAM_INSUFFICIENT_EXCEPTION", result["error_message"])
 
 
 if __name__ == "__main__":

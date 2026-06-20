@@ -1,3 +1,4 @@
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -11,25 +12,28 @@ from mcp_provisioning import (  # noqa: E402
     MCPProvisioningServer,
     UnsupportedProvisioningTargetError,
 )
+from validation_matrix import VRAMInsufficientError  # noqa: E402
 
 
 class MCPProvisioningServerTests(unittest.TestCase):
     def test_query_hardware_topology_loads_supported_demo_profiles(self):
         cases = [
-            ("NVIDIA GB200", "NVIDIA GB200", "NVLink", True, "nvidia_datacenter_blackwell"),
-            ("NVIDIA GB300", "NVIDIA GB300", "NVLink", True, "nvidia_datacenter_blackwell"),
-            ("NVIDIA B200", "NVIDIA B200", "NVLink", True, "nvidia_datacenter_blackwell"),
-            ("AMD MI355X", "AMD MI355X", "Infinity Fabric", False, "rocm_datacenter"),
-            ("AMD MI455X", "AMD MI455X", "Infinity Fabric", False, "rocm_datacenter"),
+            ("NVIDIA GB200", "NVIDIA GB200", "NVLink", "Gen5", True, "nvidia_datacenter_blackwell"),
+            ("NVIDIA GB300", "NVIDIA GB300", "NVLink", "Gen5", True, "nvidia_datacenter_blackwell"),
+            ("NVIDIA B200", "NVIDIA B200", "NVLink", "Gen5", True, "nvidia_datacenter_blackwell"),
+            ("AMD MI355X", "AMD MI355X", "Infinity Fabric", "Gen5", False, "rocm_datacenter"),
+            ("AMD MI455X", "AMD MI455X", "Infinity Fabric", "Gen5", False, "rocm_datacenter"),
+            ("A10G-24GB", "NVIDIA A10G-24GB", "PCIe", "Gen4", False, "nvidia_datacenter_ampere"),
+            ("T4-16GB", "NVIDIA T4-16GB", "PCIe", "Gen3", False, "nvidia_datacenter_turing"),
         ]
 
-        for target_gpu, accelerator, interconnect, smartnic_active, driver in cases:
+        for target_gpu, accelerator, interconnect, pcie_generation, smartnic_active, driver in cases:
             with self.subTest(target_gpu=target_gpu):
                 topology = MCPProvisioningServer.query_hardware_topology(target_gpu)
 
                 self.assertEqual(topology["accelerator"], accelerator)
                 self.assertEqual(topology["interconnect"], interconnect)
-                self.assertEqual(topology["pcie_generation"], "Gen5")
+                self.assertEqual(topology["pcie_generation"], pcie_generation)
                 self.assertEqual(topology["smartnic_active"], smartnic_active)
                 self.assertEqual(topology["optimized_driver"], driver)
 
@@ -45,7 +49,7 @@ class MCPProvisioningServerTests(unittest.TestCase):
 
         self.assertEqual(target["environment"], "kubernetes")
         self.assertEqual(target["platform"], "Rancher Desktop k3s")
-        self.assertEqual(target["nim_endpoint_mode"], "nvidia_hosted_external")
+        self.assertEqual(target["hosted_validation_mode"], "nvidia_hosted_external")
 
     def test_query_deployment_target_loads_cloud_profile(self):
         target = MCPProvisioningServer.query_deployment_target("oci")
@@ -74,10 +78,11 @@ class MCPProvisioningServerTests(unittest.TestCase):
             }
         }
 
-        result = MCPProvisioningServer.run_hardware_test_harness(
-            topology,
-            "meta/llama-test",
-        )
+        with patch.dict("os.environ", {"MODEL_FACTORY_VALIDATION_MODE": "hosted"}, clear=True):
+            result = MCPProvisioningServer.run_hardware_test_harness(
+                topology,
+                "meta/llama-test",
+            )
 
         self.assertTrue(result["success"])
         self.assertEqual(result["backend"], "nvidia_hosted_nim")
@@ -92,7 +97,7 @@ class MCPProvisioningServerTests(unittest.TestCase):
         )
 
         self.assertFalse(result["success"])
-        self.assertEqual(result["backend"], "nvidia_hosted_nim")
+        self.assertEqual(result["backend"], "validation_matrix")
         self.assertIn("model_name is required", result["error_message"])
         mock_client_class.from_env.assert_not_called()
 
@@ -100,14 +105,72 @@ class MCPProvisioningServerTests(unittest.TestCase):
     def test_validation_reports_runtime_client_error(self, mock_client_class):
         mock_client_class.from_env.side_effect = ValueError("NIM_BASE_URL is required")
 
-        result = MCPProvisioningServer.run_hardware_test_harness(
-            {"interconnect": "NVIDIA Hosted API"},
-            "meta/llama-test",
-        )
+        with patch.dict("os.environ", {"MODEL_FACTORY_VALIDATION_MODE": "hosted"}, clear=True):
+            result = MCPProvisioningServer.run_hardware_test_harness(
+                {"interconnect": "NVIDIA Hosted API"},
+                "meta/llama-test",
+            )
 
         self.assertFalse(result["success"])
         self.assertEqual(result["backend"], "nvidia_hosted_nim")
         self.assertIn("remote NIM validation failed", result["error_message"])
+
+    def test_validation_matrix_fails_when_model_does_not_fit_target_vram(self):
+        topology = MCPProvisioningServer.query_hardware_topology("A10G-24GB")
+
+        with self.assertRaises(VRAMInsufficientError) as error:
+            MCPProvisioningServer.evaluate_hardware_fit(
+                topology=topology,
+                model_name="Llama-3-70B",
+                target_gpu="A10G-24GB",
+                precision_mode="FP16",
+            )
+
+        self.assertEqual(error.exception.code, "VRAM_INSUFFICIENT_EXCEPTION")
+        self.assertGreater(error.exception.required_vram_gb, error.exception.available_vram_gb)
+
+    def test_validation_matrix_precision_mode_reduces_vram_and_improves_tps(self):
+        topology = MCPProvisioningServer.query_hardware_topology("H100-80GB")
+        fp16_compile = MCPProvisioningServer.evaluate_hardware_fit(
+            topology=topology,
+            model_name="Llama-3-30B",
+            target_gpu="H100-80GB",
+            precision_mode="FP16",
+        )
+        int4_compile = MCPProvisioningServer.evaluate_hardware_fit(
+            topology=topology,
+            model_name="Llama-3-30B",
+            target_gpu="H100-80GB",
+            precision_mode="INT4",
+        )
+
+        fp16_benchmark = MCPProvisioningServer.run_hardware_test_harness(
+            topology,
+            "Llama-3-30B",
+            target_gpu="H100-80GB",
+            precision_mode="FP16",
+            compile_result=fp16_compile,
+        )
+        int4_benchmark = MCPProvisioningServer.run_hardware_test_harness(
+            topology,
+            "Llama-3-30B",
+            target_gpu="H100-80GB",
+            precision_mode="INT4",
+            compile_result=int4_compile,
+        )
+
+        self.assertLess(
+            int4_compile["required_vram_gb"],
+            fp16_compile["required_vram_gb"],
+        )
+        self.assertGreater(
+            int4_benchmark["metrics"]["tokens_per_second"],
+            fp16_benchmark["metrics"]["tokens_per_second"],
+        )
+        self.assertLess(
+            int4_benchmark["metrics"]["accuracy_score"],
+            fp16_benchmark["metrics"]["accuracy_score"],
+        )
 
 
 if __name__ == "__main__":

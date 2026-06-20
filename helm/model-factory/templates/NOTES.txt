@@ -1,0 +1,20 @@
+Model Factory is installed.
+
+{{- if .Values.ingress.enabled }}
+Ingress access:
+{{- range .Values.ingress.hosts }}
+  http://{{ .host }}
+{{- end }}
+
+Service Health:
+  curl -sS http://{{ (first .Values.ingress.hosts).host }}/health | jq .
+
+Factory Ingest API:
+  curl -sS -X POST http://{{ (first .Values.ingress.hosts).host }}/factory/ingest \
+    -H "Content-Type: application/json" \
+    -d '{"model_name":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","target_gpu":"NVIDIA GB200","target_environment":"kubernetes"}' | jq .
+{{- else }}
+Ingress is disabled. Re-run the same Helm install or upgrade command with:
+  --set ingress.enabled=true
+  --set ingress.className=<ingress-class>
+{{- end }}

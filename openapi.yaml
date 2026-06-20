@@ -1,0 +1,444 @@
+openapi: 3.1.0
+info:
+  title: Model Factory Control Plane API
+  version: 0.1.0
+  description: |
+    API contract for the Model Factory POC control plane.
+
+    The API accepts model compilation requests, starts asynchronous Temporal
+    workflows, exposes workflow status, and exports Prometheus metrics.
+servers:
+  - url: http://localhost:8000
+    description: Local Docker Compose API
+  - url: http://model-factory.localhost
+    description: Local Kubernetes ingress API
+tags:
+  - name: Health
+    description: Runtime readiness endpoints.
+  - name: Factory
+    description: Model factory workflow endpoints.
+  - name: Observability
+    description: Prometheus metrics endpoints.
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Check API readiness
+      operationId: getHealth
+      responses:
+        "200":
+          description: API readiness state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              examples:
+                healthy:
+                  value:
+                    status: ok
+                    temporal_connected: true
+  /metrics:
+    get:
+      tags:
+        - Observability
+      summary: Export API process Prometheus metrics
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Prometheus text exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                metrics:
+                  value: |
+                    # HELP model_factory_pipeline_duration_seconds Duration of each model factory pipeline stage.
+                    # TYPE model_factory_pipeline_duration_seconds histogram
+  /factory/ingest:
+    post:
+      tags:
+        - Factory
+      summary: Start a distributed model factory workflow
+      description: |
+        Validates the ingest payload, starts a Temporal workflow, and returns
+        immediately with a workflow identifier and status URL.
+      operationId: ingestFactoryRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelIngestRequest"
+            examples:
+              int4_h100_success:
+                summary: Llama 70B INT4 on H100
+                value:
+                  model_name: Llama-3-70B
+                  target_gpu: H100-80GB
+                  target_environment: kubernetes
+                  precision_mode: INT4
+              fp16_a10g_failure:
+                summary: Llama 70B FP16 on A10G
+                value:
+                  model_name: Llama-3-70B
+                  target_gpu: A10G-24GB
+                  target_environment: kubernetes
+                  precision_mode: FP16
+      responses:
+        "200":
+          description: Workflow accepted and started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FactoryIngestAccepted"
+              examples:
+                accepted:
+                  value:
+                    message: Distributed Model Factory compilation pipeline initiated.
+                    workflow_id: model-factory-llama-3-70b-int4-a1b2c3d4
+                    status_url: /factory/status/model-factory-llama-3-70b-int4-a1b2c3d4
+                    precision_mode: INT4
+        "500":
+          description: Workflow could not be started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Temporal client is not connected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Request validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /factory/status/{workflow_id}:
+    get:
+      tags:
+        - Factory
+      summary: Get workflow status and final result
+      description: |
+        Queries Temporal for the workflow state. Completed workflows include the
+        final pipeline summary returned by the worker.
+      operationId: getFactoryStatus
+      parameters:
+        - name: workflow_id
+          in: path
+          required: true
+          description: Temporal workflow identifier returned by `/factory/ingest`.
+          schema:
+            type: string
+          example: model-factory-llama-3-70b-int4-a1b2c3d4
+      responses:
+        "200":
+          description: Workflow state and optional final pipeline summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowStatusResponse"
+              examples:
+                running:
+                  value:
+                    workflow_id: model-factory-llama-3-70b-int4-a1b2c3d4
+                    status: RUNNING
+                completed_success:
+                  value:
+                    workflow_id: model-factory-llama-3-70b-int4-a1b2c3d4
+                    status: COMPLETED
+                    pipeline_summary:
+                      model: Llama-3-70B
+                      hardware: H100-80GB
+                      environment: kubernetes
+                      precision_mode: INT4
+                      final_status: Model_Service_Ready_To_Deploy
+                      deployable: true
+                      error_log: ""
+                completed_failure:
+                  value:
+                    workflow_id: model-factory-llama-3-70b-fp16-a1b2c3d4
+                    status: COMPLETED
+                    pipeline_summary:
+                      model: Llama-3-70B
+                      hardware: A10G-24GB
+                      environment: kubernetes
+                      precision_mode: FP16
+                      final_status: Failed
+                      deployable: false
+                      error_log: "VRAM_INSUFFICIENT_EXCEPTION: model Llama-3-70B requires 158.80GB VRAM with FP16, but A10G-24GB exposes 24.00GB."
+        "404":
+          description: Workflow was not found or could not be queried.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Temporal client is not connected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    PrecisionMode:
+      type: string
+      enum:
+        - FP16
+        - INT8
+        - INT4
+      default: FP16
+      description: |
+        Model precision mode used by the validation matrix. Lower precision
+        reduces the estimated VRAM footprint and changes simulated benchmark
+        results.
+    ModelIngestRequest:
+      type: object
+      required:
+        - model_name
+        - target_gpu
+      properties:
+        model_name:
+          type: string
+          minLength: 1
+          description: Model identifier or model label containing a size token such as `70B`.
+          examples:
+            - Llama-3-70B
+            - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+        target_gpu:
+          type: string
+          minLength: 1
+          description: Hardware target matched against `src/config/hardware_profiles.json`.
+          examples:
+            - H100-80GB
+            - A10G-24GB
+            - NVIDIA GB200
+        target_environment:
+          type: string
+          minLength: 1
+          default: kubernetes
+          description: Deployment environment matched against `src/config/deployment_targets.json`.
+          examples:
+            - kubernetes
+            - cloud
+            - on-prem
+        precision_mode:
+          $ref: "#/components/schemas/PrecisionMode"
+    FactoryIngestAccepted:
+      type: object
+      required:
+        - message
+        - workflow_id
+        - status_url
+        - precision_mode
+      properties:
+        message:
+          type: string
+        workflow_id:
+          type: string
+        status_url:
+          type: string
+        precision_mode:
+          $ref: "#/components/schemas/PrecisionMode"
+    WorkflowStatusResponse:
+      type: object
+      required:
+        - workflow_id
+        - status
+      properties:
+        workflow_id:
+          type: string
+        status:
+          type: string
+          description: Temporal workflow status name.
+          examples:
+            - RUNNING
+            - COMPLETED
+            - FAILED
+            - TERMINATED
+        pipeline_summary:
+          $ref: "#/components/schemas/PipelineSummary"
+    PipelineSummary:
+      type: object
+      description: Final result returned by the Temporal worker activity.
+      required:
+        - model
+        - hardware
+        - environment
+        - precision_mode
+        - final_status
+        - deployable
+        - error_log
+      properties:
+        model:
+          type: string
+        hardware:
+          type: string
+        environment:
+          type: string
+        precision_mode:
+          $ref: "#/components/schemas/PrecisionMode"
+        topology_used:
+          type: object
+          additionalProperties: true
+        deployment_target:
+          type: object
+          additionalProperties: true
+        precision:
+          $ref: "#/components/schemas/PrecisionResult"
+        compile_result:
+          $ref: "#/components/schemas/CompileResult"
+        test_metrics:
+          $ref: "#/components/schemas/ValidationMetrics"
+        stage_durations:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+          description: Stage duration in seconds by stage name.
+        final_status:
+          type: string
+          examples:
+            - Model_Service_Ready_To_Deploy
+            - Failed
+        deployable:
+          type: boolean
+        error_log:
+          type: string
+    PrecisionResult:
+      type: object
+      properties:
+        profiled:
+          type: boolean
+          description: True when the workflow recorded quantized precision metadata.
+        mode:
+          $ref: "#/components/schemas/PrecisionMode"
+        bytes_per_parameter:
+          type: number
+          format: double
+        throughput_multiplier:
+          type: number
+          format: double
+        latency_multiplier:
+          type: number
+          format: double
+        accuracy_score:
+          type: number
+          format: double
+        compile_seconds:
+          type: number
+          format: double
+    CompileResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        stage:
+          type: string
+          example: compile
+        reason:
+          type: string
+          examples:
+            - fit
+            - oom
+        error_code:
+          type: string
+          example: VRAM_INSUFFICIENT_EXCEPTION
+        error_message:
+          type: string
+        model_name:
+          type: string
+        target_gpu:
+          type: string
+        parameter_count_billion:
+          type: number
+          format: double
+        required_vram_gb:
+          type: number
+          format: double
+        available_vram_gb:
+          type: number
+          format: double
+        vram_utilization_ratio:
+          type: number
+          format: double
+        precision_mode:
+          $ref: "#/components/schemas/PrecisionMode"
+        architecture:
+          type: string
+    ValidationMetrics:
+      type: object
+      properties:
+        tokens_per_second:
+          type: number
+          format: double
+        error_rate:
+          type: number
+          format: double
+        latency_ms:
+          type: number
+          format: double
+        output_tokens:
+          type: integer
+        accuracy_score:
+          type: number
+          format: double
+        required_vram_gb:
+          type: number
+          format: double
+        available_vram_gb:
+          type: number
+          format: double
+        vram_utilization_ratio:
+          type: number
+          format: double
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - temporal_connected
+      properties:
+        status:
+          type: string
+          example: ok
+        temporal_connected:
+          type: boolean
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: "#/components/schemas/ValidationError"
+    ValidationError:
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      properties:
+        loc:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: integer
+        msg:
+          type: string
+        type:
+          type: string
+    HTTPValidationError:
+      type: object
+      properties:
+        detail:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationError"

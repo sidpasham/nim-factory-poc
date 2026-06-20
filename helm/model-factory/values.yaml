@@ -1,0 +1,75 @@
+replicaCount: 1
+
+image:
+  repository: model-factory-poc-app
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: model-factory.localhost
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+config:
+  minimumTpsThreshold: "100"
+  nimBaseUrl: "https://integrate.api.nvidia.com/v1"
+  nimTimeoutSeconds: "30"
+  validationMode: "validation"
+  temporalAddress: ""
+  logLevel: "INFO"
+
+temporal:
+  enabled: true
+  image: temporalio/admin-tools:1.30
+  servicePort: 7233
+  uiPort: 8233
+
+worker:
+  replicaCount: 1
+  metricsPort: 9000
+  maxConcurrentActivities: "10"
+
+secret:
+  create: false
+  name: model-factory-secrets
+  nvidiaApiKey: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/path: "/metrics"
+  prometheus.io/port: "8000"
+
+workerPodAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/path: "/"
+  prometheus.io/port: "9000"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL

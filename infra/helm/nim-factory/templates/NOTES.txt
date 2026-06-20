@@ -1,9 +1,0 @@
-NIM Factory is installed.
-
-Port-forward the service:
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "nim-factory.fullname" . }} 8001:{{ .Values.service.port }}
-
-Call the factory:
-  curl -sS -X POST http://localhost:8001/factory/ingest \
-    -H "Content-Type: application/json" \
-    -d '{"model_name":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","target_gpu":"NVIDIA GB200","target_environment":"kubernetes"}' | jq .

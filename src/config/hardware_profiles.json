@@ -9,6 +9,11 @@
       ],
       "topology": {
         "accelerator": "NVIDIA GB200",
+        "architecture": "Blackwell GB200",
+        "vram_gb": 192,
+        "gpu_count": 1,
+        "memory_bandwidth_gbps": 8000,
+        "validation_tps_baseline": 2600,
         "interconnect": "NVLink",
         "pcie_generation": "Gen5",
         "smartnic_active": true,
@@ -24,6 +29,11 @@
       ],
       "topology": {
         "accelerator": "NVIDIA GB300",
+        "architecture": "Blackwell GB300",
+        "vram_gb": 288,
+        "gpu_count": 1,
+        "memory_bandwidth_gbps": 9000,
+        "validation_tps_baseline": 3100,
         "interconnect": "NVLink",
         "pcie_generation": "Gen5",
         "smartnic_active": true,
@@ -39,6 +49,11 @@
       ],
       "topology": {
         "accelerator": "NVIDIA B200",
+        "architecture": "Blackwell B200",
+        "vram_gb": 180,
+        "gpu_count": 1,
+        "memory_bandwidth_gbps": 8000,
+        "validation_tps_baseline": 2300,
         "interconnect": "NVLink",
         "pcie_generation": "Gen5",
         "smartnic_active": true,
@@ -54,6 +69,11 @@
       ],
       "topology": {
         "accelerator": "AMD MI355X",
+        "architecture": "AMD CDNA",
+        "vram_gb": 288,
+        "gpu_count": 1,
+        "memory_bandwidth_gbps": 8000,
+        "validation_tps_baseline": 1800,
         "interconnect": "Infinity Fabric",
         "pcie_generation": "Gen5",
         "smartnic_active": false,
@@ -69,10 +89,75 @@
       ],
       "topology": {
         "accelerator": "AMD MI455X",
+        "architecture": "AMD CDNA",
+        "vram_gb": 288,
+        "gpu_count": 1,
+        "memory_bandwidth_gbps": 9000,
+        "validation_tps_baseline": 2100,
         "interconnect": "Infinity Fabric",
         "pcie_generation": "Gen5",
         "smartnic_active": false,
         "optimized_driver": "rocm_datacenter"
+      }
+    },
+    {
+      "name": "nvidia-h100-80gb",
+      "match_any": [
+        "NVIDIA H100",
+        "H100",
+        "H100-80GB"
+      ],
+      "topology": {
+        "accelerator": "NVIDIA H100-80GB",
+        "architecture": "Hopper H100",
+        "vram_gb": 80,
+        "gpu_count": 1,
+        "memory_bandwidth_gbps": 3350,
+        "validation_tps_baseline": 1450,
+        "interconnect": "NVLink",
+        "pcie_generation": "Gen5",
+        "smartnic_active": true,
+        "optimized_driver": "nvidia_datacenter_hopper"
+      }
+    },
+    {
+      "name": "nvidia-a10g-24gb",
+      "match_any": [
+        "NVIDIA A10G",
+        "A10G",
+        "A10G-24GB"
+      ],
+      "topology": {
+        "accelerator": "NVIDIA A10G-24GB",
+        "architecture": "Ampere A10G",
+        "vram_gb": 24,
+        "gpu_count": 1,
+        "memory_bandwidth_gbps": 600,
+        "validation_tps_baseline": 420,
+        "interconnect": "PCIe",
+        "pcie_generation": "Gen4",
+        "smartnic_active": false,
+        "optimized_driver": "nvidia_datacenter_ampere"
+      }
+    },
+    {
+      "name": "nvidia-t4-16gb",
+      "match_any": [
+        "NVIDIA T4",
+        "T4",
+        "T4-16GB"
+      ],
+      "topology": {
+        "accelerator": "NVIDIA T4-16GB",
+        "architecture": "Turing T4",
+        "vram_gb": 16,
+        "gpu_count": 1,
+        "memory_bandwidth_gbps": 320,
+        "validation_tps_baseline": 160,
+        "interconnect": "PCIe",
+        "pcie_generation": "Gen3",
+        "smartnic_active": false,
+        "optimized_driver": "nvidia_datacenter_turing"
       }
     }
   ]

@@ -1,0 +1,55 @@
+{{- if .Values.temporal.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "model-factory.fullname" . }}-temporal
+  labels:
+    {{- include "model-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: {{ .Values.temporal.servicePort }}
+      targetPort: grpc
+      protocol: TCP
+    - name: ui
+      port: {{ .Values.temporal.uiPort }}
+      targetPort: ui
+      protocol: TCP
+  selector:
+    {{- include "model-factory.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "model-factory.fullname" . }}-temporal
+  labels:
+    {{- include "model-factory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "model-factory.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: temporal
+  template:
+    metadata:
+      labels:
+        {{- include "model-factory.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: temporal
+    spec:
+      containers:
+        - name: temporal
+          image: {{ .Values.temporal.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["temporal", "server", "start-dev", "--ip", "0.0.0.0"]
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.temporal.servicePort }}
+              protocol: TCP
+            - name: ui
+              containerPort: {{ .Values.temporal.uiPort }}
+              protocol: TCP
+{{- end }}
