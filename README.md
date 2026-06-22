@@ -68,9 +68,9 @@ flowchart LR
     api -->|start workflow| temporal[Temporal server]
     api -->|workflow_id + status_url| client
     temporal -->|llm-gpu-benchmarking-task-queue| worker[Temporal worker]
-    worker -->|run activity| graph[LangGraph benchmark pipeline]
+    worker -->|run activity| pipeline[LangGraph benchmark pipeline]
 
-    graph --> discovery[discover_infrastructure]
+    pipeline --> discovery[discover_infrastructure]
     discovery --> precision[record_precision_profile]
     precision --> compile[compile_validation_matrix_plan]
     compile --> benchmark[run_validation_harness]
