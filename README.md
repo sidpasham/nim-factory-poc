@@ -62,30 +62,47 @@ result, increment Prometheus counters, and show up in Grafana.
 
 ## Architecture
 
+### Runtime Components
+
 ```mermaid
-flowchart LR
-    client[Client] -->|POST /benchmarks| api[FastAPI control plane]
-    api -->|start workflow| temporal[Temporal server]
-    api -->|workflow_id + status_url| client
-    temporal -->|llm-gpu-benchmarking-task-queue| worker[Temporal worker]
-    worker -->|run activity| pipeline[LangGraph benchmark pipeline]
+flowchart TB
+    client[Client]
+    api[FastAPI API]
+    temporal[Temporal]
+    worker[Worker]
+    pipeline[LangGraph pipeline]
+    result[Run summary]
 
-    pipeline --> discovery[discover_infrastructure]
-    discovery --> precision[record_precision_profile]
-    precision --> compile[compile_validation_matrix_plan]
-    compile --> benchmark[run_validation_harness]
-    benchmark --> route[route_validation_results]
-    route -->|success and TPS threshold met| publish[compile_and_publish_model_service]
-    route -->|validation failure| failure[handle_failure]
-
-    publish --> ready[Model_Service_Ready_To_Deploy]
-    failure --> failed[Failed]
-
-    hardware[(hardware_profiles.json)] --> discovery
-    targets[(deployment_targets.json)] --> discovery
-    matrix[(validation_matrix.py)] --> compile
-    matrix --> benchmark
+    client -->|POST /benchmarks| api
+    api -->|start workflow| temporal
+    temporal -->|task queue| worker
+    worker --> pipeline
+    pipeline --> result
+    api -->|GET /benchmarks/id| result
 ```
+
+### Benchmark Pipeline
+
+```mermaid
+flowchart TB
+    request[Request]
+    profiles[Resolve profiles]
+    fit[Check VRAM fit]
+    bench[Simulate benchmark]
+    decision{Deployable?}
+    ready[Ready to deploy]
+    failed[Failed]
+
+    request --> profiles
+    profiles --> fit
+    fit -->|fits| bench
+    fit -->|OOM| failed
+    bench --> decision
+    decision -->|yes| ready
+    decision -->|no| failed
+```
+
+### Observability
 
 ```mermaid
 flowchart TB
