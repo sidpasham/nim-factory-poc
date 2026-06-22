@@ -41,7 +41,7 @@ PAYLOADS: List[Dict[str, Any]] = [
 
 
 async def submit_one(client: httpx.AsyncClient, payload: Dict[str, Any]) -> Dict[str, Any]:
-    response = await client.post("/factory/ingest", json=payload)
+    response = await client.post("/benchmarks", json=payload)
     response.raise_for_status()
     return response.json()
 
@@ -61,7 +61,7 @@ async def wait_for_completion(
     timeout_seconds: float,
 ) -> Dict[str, Any]:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
-    status_url = f"/factory/status/{workflow_id}"
+    status_url = f"/benchmarks/{workflow_id}"
 
     while asyncio.get_running_loop().time() < deadline:
         response = await client.get(status_url)
@@ -75,8 +75,8 @@ async def wait_for_completion(
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Submit validation-matrix load to Model Factory.")
-    parser.add_argument("--base-url", default="http://localhost:8000")
+    parser = argparse.ArgumentParser(description="Submit validation-matrix load to LLM GPU Benchmarking.")
+    parser.add_argument("--base-url", default="http://llm-gpu-benchmarking.localhost")
     parser.add_argument("--requests", type=int, default=25)
     parser.add_argument("--concurrency", type=int, default=5)
     parser.add_argument("--poll", type=parse_bool, default=True)

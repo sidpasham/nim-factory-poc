@@ -1,9 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "model-factory.fullname" . }}
+  name: {{ include "llm-gpu-benchmarking.fullname" . }}
   labels:
-    {{- include "model-factory.labels" . | nindent 4 }}
+    {{- include "llm-gpu-benchmarking.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
   replicas: {{ .Values.replicaCount }}
@@ -11,18 +11,18 @@ spec:
     type: RollingUpdate
   selector:
     matchLabels:
-      {{- include "model-factory.apiSelectorLabels" . | nindent 6 }}
+      {{- include "llm-gpu-benchmarking.apiSelectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "model-factory.apiSelectorLabels" . | nindent 8 }}
+        {{- include "llm-gpu-benchmarking.apiSelectorLabels" . | nindent 8 }}
       annotations:
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: model-factory
+        - name: llm-gpu-benchmarking
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
@@ -33,9 +33,9 @@ spec:
               protocol: TCP
           envFrom:
             - configMapRef:
-                name: {{ include "model-factory.fullname" . }}-config
+                name: {{ include "llm-gpu-benchmarking.fullname" . }}-config
             - secretRef:
-                name: {{ include "model-factory.secretName" . }}
+                name: {{ include "llm-gpu-benchmarking.secretName" . }}
                 optional: true
           readinessProbe:
             httpGet:

@@ -78,7 +78,7 @@ class MCPProvisioningServerTests(unittest.TestCase):
             }
         }
 
-        with patch.dict("os.environ", {"MODEL_FACTORY_VALIDATION_MODE": "hosted"}, clear=True):
+        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_VALIDATION_MODE": "hosted"}, clear=True):
             result = MCPProvisioningServer.run_hardware_test_harness(
                 topology,
                 "meta/llama-test",
@@ -105,7 +105,7 @@ class MCPProvisioningServerTests(unittest.TestCase):
     def test_validation_reports_runtime_client_error(self, mock_client_class):
         mock_client_class.from_env.side_effect = ValueError("NIM_BASE_URL is required")
 
-        with patch.dict("os.environ", {"MODEL_FACTORY_VALIDATION_MODE": "hosted"}, clear=True):
+        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_VALIDATION_MODE": "hosted"}, clear=True):
             result = MCPProvisioningServer.run_hardware_test_harness(
                 {"interconnect": "NVIDIA Hosted API"},
                 "meta/llama-test",

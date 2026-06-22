@@ -22,6 +22,23 @@ class SchemaTests(unittest.TestCase):
                 )
                 self.assertEqual(request.precision_mode, PrecisionMode(mode))
 
+    def test_precision_mode_normalizes_supported_aliases(self):
+        aliases = {
+            "half": PrecisionMode.FP16,
+            "8bit": PrecisionMode.INT8,
+            "4bit": PrecisionMode.INT4,
+            "AWQ": PrecisionMode.INT4,
+            "INT4-AWQ": PrecisionMode.INT4,
+        }
+        for alias, expected in aliases.items():
+            with self.subTest(alias=alias):
+                request = ModelIngestRequest(
+                    model_name="Llama-3-8B",
+                    target_gpu="H100-80GB",
+                    precision_mode=alias,
+                )
+                self.assertEqual(request.precision_mode, expected)
+
     def test_precision_mode_rejects_unsupported_modes(self):
         with self.assertRaises(ValidationError):
             ModelIngestRequest(

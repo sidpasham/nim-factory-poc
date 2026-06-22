@@ -1,4 +1,4 @@
-Model Factory is installed.
+LLM GPU Benchmarking is installed.
 
 {{- if .Values.ingress.enabled }}
 Ingress access:
@@ -9,8 +9,8 @@ Ingress access:
 Service Health:
   curl -sS http://{{ (first .Values.ingress.hosts).host }}/health | jq .
 
-Factory Ingest API:
-  curl -sS -X POST http://{{ (first .Values.ingress.hosts).host }}/factory/ingest \
+Benchmark Ingest API:
+  curl -sS -X POST http://{{ (first .Values.ingress.hosts).host }}/benchmarks \
     -H "Content-Type: application/json" \
     -d '{"model_name":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","target_gpu":"NVIDIA GB200","target_environment":"kubernetes"}' | jq .
 {{- else }}

@@ -1,1 +1,1 @@
-"""Model Factory control-plane package."""
+"""LLM GPU Benchmarking control-plane package."""

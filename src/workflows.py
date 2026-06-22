@@ -8,7 +8,7 @@ with workflow.unsafe.imports_passed_through():
 
 
 @workflow.defn
-class ModelFactoryWorkflow:
+class LlmGpuBenchmarkingWorkflow:
     @workflow.run
     async def run(self, state: dict) -> dict:
         retry_policy = RetryPolicy(

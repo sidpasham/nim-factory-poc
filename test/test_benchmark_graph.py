@@ -7,14 +7,14 @@ from unittest.mock import patch
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-from factory_graph import (  # noqa: E402
+from benchmark_graph import (  # noqa: E402
     handle_failure,
-    model_factory_graph_pipeline,
+    llm_gpu_benchmarking_graph_pipeline,
     route_validation_results,
 )
 
 
-class FactoryGraphTests(unittest.TestCase):
+class BenchmarkGraphTests(unittest.TestCase):
     def test_route_validation_results_publishes_successful_high_throughput_run(self):
         with patch.dict("os.environ", {}, clear=True):
             route = route_validation_results({
@@ -29,7 +29,7 @@ class FactoryGraphTests(unittest.TestCase):
         self.assertEqual(route, "publish")
 
     def test_route_validation_results_fails_low_throughput_run(self):
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD": "1200"}, clear=True):
             route = route_validation_results({
                 "validation_results": {
                     "success": True,
@@ -42,7 +42,7 @@ class FactoryGraphTests(unittest.TestCase):
         self.assertEqual(route, "fail")
 
     def test_route_validation_results_uses_configured_tps_threshold(self):
-        with patch.dict("os.environ", {"MODEL_FACTORY_MINIMUM_TPS_THRESHOLD": "100"}, clear=True):
+        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD": "100"}, clear=True):
             route = route_validation_results({
                 "validation_results": {
                     "success": True,
@@ -68,7 +68,7 @@ class FactoryGraphTests(unittest.TestCase):
         self.assertEqual(route, "fail")
 
     def test_handle_failure_uses_state_to_build_contextual_error_message(self):
-        with patch.dict("os.environ", {"MODEL_FACTORY_MINIMUM_TPS_THRESHOLD": "100"}, clear=True), \
+        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD": "100"}, clear=True), \
                 patch("builtins.print"):
             result = handle_failure({
                 "model_name": "llama-demo",
@@ -101,8 +101,8 @@ class FactoryGraphTests(unittest.TestCase):
         self.assertIn("error_rate=0.0", result["error_message"])
 
     def test_pipeline_records_precision_profile_for_int4(self):
-        with patch.dict("os.environ", {"MODEL_FACTORY_MINIMUM_TPS_THRESHOLD": "1"}, clear=True):
-            result = model_factory_graph_pipeline.invoke({
+        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD": "1"}, clear=True):
+            result = llm_gpu_benchmarking_graph_pipeline.invoke({
                 "model_name": "Llama-3-30B",
                 "target_gpu": "H100-80GB",
                 "target_environment": "kubernetes",
@@ -126,8 +126,8 @@ class FactoryGraphTests(unittest.TestCase):
         )
 
     def test_pipeline_fails_vram_insufficient_compile(self):
-        with patch.dict("os.environ", {"MODEL_FACTORY_MINIMUM_TPS_THRESHOLD": "1"}, clear=True):
-            result = model_factory_graph_pipeline.invoke({
+        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD": "1"}, clear=True):
+            result = llm_gpu_benchmarking_graph_pipeline.invoke({
                 "model_name": "Llama-3-70B",
                 "target_gpu": "A10G-24GB",
                 "target_environment": "kubernetes",

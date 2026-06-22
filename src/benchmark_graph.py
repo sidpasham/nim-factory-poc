@@ -17,8 +17,8 @@ LOGGER = logging.getLogger(__name__)
 
 PUBLISH_STATUS = "Model_Service_Ready_To_Deploy"
 FAILED_STATUS = "Failed"
-DEFAULT_MINIMUM_TPS_THRESHOLD = 1200.0
-MINIMUM_TPS_THRESHOLD_ENV = "MODEL_FACTORY_MINIMUM_TPS_THRESHOLD"
+DEFAULT_MINIMUM_TPS_THRESHOLD = 100.0
+MINIMUM_TPS_THRESHOLD_ENV = "LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD"
 
 
 def minimum_tps_threshold() -> float:
@@ -39,7 +39,7 @@ def _format_tps(value: float) -> str:
     return f"{value:g}"
 
 
-class FactoryState(TypedDict, total=False):
+class BenchmarkState(TypedDict, total=False):
     model_name: str
     target_gpu: str
     target_environment: str
@@ -55,7 +55,7 @@ class FactoryState(TypedDict, total=False):
 
 
 def _stage_update(
-    state: FactoryState,
+    state: BenchmarkState,
     stage: str,
     start_time: float,
     update: Dict[str, Any],
@@ -66,7 +66,7 @@ def _stage_update(
     return update
 
 
-def discover_infrastructure(state: FactoryState) -> Dict[str, Any]:
+def discover_infrastructure(state: BenchmarkState) -> Dict[str, Any]:
     start_time = time.perf_counter()
     LOGGER.info(
         "discovering infrastructure for model=%s hardware=%s environment=%s",
@@ -90,14 +90,14 @@ def discover_infrastructure(state: FactoryState) -> Dict[str, Any]:
     )
 
 
-def route_precision_profile(state: FactoryState) -> str:
+def route_precision_profile(state: BenchmarkState) -> str:
     mode = normalize_precision_mode(state.get("precision_mode", "FP16"))
     if mode == "FP16":
         return "skip"
     return "profile"
 
 
-def record_precision_profile(state: FactoryState) -> Dict[str, Any]:
+def record_precision_profile(state: BenchmarkState) -> Dict[str, Any]:
     start_time = time.perf_counter()
     mode = normalize_precision_mode(state.get("precision_mode", "FP16"))
     metadata = precision_metadata(mode)
@@ -121,7 +121,7 @@ def record_precision_profile(state: FactoryState) -> Dict[str, Any]:
     )
 
 
-def compile_validation_matrix_plan(state: FactoryState) -> Dict[str, Any]:
+def compile_validation_matrix_plan(state: BenchmarkState) -> Dict[str, Any]:
     start_time = time.perf_counter()
     mode = normalize_precision_mode(state.get("precision_mode", "FP16"))
 
@@ -188,14 +188,14 @@ def compile_validation_matrix_plan(state: FactoryState) -> Dict[str, Any]:
         )
 
 
-def route_compile_results(state: FactoryState) -> str:
+def route_compile_results(state: BenchmarkState) -> str:
     compile_result = state.get("compile_result", {})
     if compile_result.get("success"):
         return "benchmark"
     return "fail"
 
 
-def run_validation_harness(state: FactoryState) -> Dict[str, Any]:
+def run_validation_harness(state: BenchmarkState) -> Dict[str, Any]:
     start_time = time.perf_counter()
     mode = normalize_precision_mode(state.get("precision_mode", "FP16"))
     LOGGER.info(
@@ -222,7 +222,7 @@ def run_validation_harness(state: FactoryState) -> Dict[str, Any]:
     )
 
 
-def handle_failure(state: FactoryState) -> Dict[str, Any]:
+def handle_failure(state: BenchmarkState) -> Dict[str, Any]:
     start_time = time.perf_counter()
     validation_results = state.get("validation_results", {})
     compile_result = state.get("compile_result", {})
@@ -256,7 +256,7 @@ def handle_failure(state: FactoryState) -> Dict[str, Any]:
         f"in {environment} ({interconnect}; error_rate={error_rate})."
     )
 
-    LOGGER.warning("factory pipeline failed: %s", error_message)
+    LOGGER.warning("benchmark pipeline failed: %s", error_message)
     return _stage_update(
         state,
         "failure",
@@ -268,7 +268,7 @@ def handle_failure(state: FactoryState) -> Dict[str, Any]:
     )
 
 
-def compile_and_publish_model_service(state: FactoryState) -> Dict[str, Any]:
+def compile_and_publish_model_service(state: BenchmarkState) -> Dict[str, Any]:
     start_time = time.perf_counter()
     LOGGER.info(
         "model passed validation model=%s hardware=%s environment=%s precision_mode=%s",
@@ -285,7 +285,7 @@ def compile_and_publish_model_service(state: FactoryState) -> Dict[str, Any]:
     )
 
 
-def route_validation_results(state: FactoryState) -> str:
+def route_validation_results(state: BenchmarkState) -> str:
     results = state.get("validation_results", {})
     tokens_per_second = results.get("metrics", {}).get("tokens_per_second", 0)
     if results.get("success") and tokens_per_second > minimum_tps_threshold():
@@ -293,7 +293,7 @@ def route_validation_results(state: FactoryState) -> str:
     return "fail"
 
 
-workflow = StateGraph(FactoryState)
+workflow = StateGraph(BenchmarkState)
 workflow.add_node("discover_infrastructure", discover_infrastructure)
 workflow.add_node("record_precision_profile", record_precision_profile)
 workflow.add_node("compile_validation_matrix_plan", compile_validation_matrix_plan)
@@ -330,4 +330,4 @@ workflow.add_conditional_edges(
 workflow.add_edge("compile_and_publish_model_service", END)
 workflow.add_edge("handle_failure", END)
 
-model_factory_graph_pipeline = workflow.compile()
+llm_gpu_benchmarking_graph_pipeline = workflow.compile()

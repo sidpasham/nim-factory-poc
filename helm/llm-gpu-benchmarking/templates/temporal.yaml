@@ -2,9 +2,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "model-factory.fullname" . }}-temporal
+  name: {{ include "llm-gpu-benchmarking.fullname" . }}-temporal
   labels:
-    {{- include "model-factory.labels" . | nindent 4 }}
+    {{- include "llm-gpu-benchmarking.labels" . | nindent 4 }}
     app.kubernetes.io/component: temporal
 spec:
   type: ClusterIP
@@ -18,26 +18,26 @@ spec:
       targetPort: ui
       protocol: TCP
   selector:
-    {{- include "model-factory.selectorLabels" . | nindent 4 }}
+    {{- include "llm-gpu-benchmarking.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: temporal
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "model-factory.fullname" . }}-temporal
+  name: {{ include "llm-gpu-benchmarking.fullname" . }}-temporal
   labels:
-    {{- include "model-factory.labels" . | nindent 4 }}
+    {{- include "llm-gpu-benchmarking.labels" . | nindent 4 }}
     app.kubernetes.io/component: temporal
 spec:
   replicas: 1
   selector:
     matchLabels:
-      {{- include "model-factory.selectorLabels" . | nindent 6 }}
+      {{- include "llm-gpu-benchmarking.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: temporal
   template:
     metadata:
       labels:
-        {{- include "model-factory.selectorLabels" . | nindent 8 }}
+        {{- include "llm-gpu-benchmarking.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: temporal
     spec:
       containers:

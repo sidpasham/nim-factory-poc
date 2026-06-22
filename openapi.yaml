@@ -1,22 +1,20 @@
 openapi: 3.1.0
 info:
-  title: Model Factory Control Plane API
+  title: LLM GPU Benchmarking Control Plane API
   version: 0.1.0
   description: |
-    API contract for the Model Factory POC control plane.
+    API contract for the LLM GPU Benchmarking control plane.
 
     The API accepts model compilation requests, starts asynchronous Temporal
     workflows, exposes workflow status, and exports Prometheus metrics.
 servers:
-  - url: http://localhost:8000
-    description: Local Docker Compose API
-  - url: http://model-factory.localhost
+  - url: http://llm-gpu-benchmarking.localhost
     description: Local Kubernetes ingress API
 tags:
   - name: Health
     description: Runtime readiness endpoints.
-  - name: Factory
-    description: Model factory workflow endpoints.
+  - name: Benchmarks
+    description: LLM GPU benchmarking workflow endpoints.
   - name: Observability
     description: Prometheus metrics endpoints.
 paths:
@@ -54,17 +52,17 @@ paths:
               examples:
                 metrics:
                   value: |
-                    # HELP model_factory_pipeline_duration_seconds Duration of each model factory pipeline stage.
-                    # TYPE model_factory_pipeline_duration_seconds histogram
-  /factory/ingest:
+                    # HELP llm_gpu_benchmarking_pipeline_duration_seconds Duration of each LLM GPU benchmarking pipeline stage.
+                    # TYPE llm_gpu_benchmarking_pipeline_duration_seconds histogram
+  /benchmarks:
     post:
       tags:
-        - Factory
-      summary: Start a distributed model factory workflow
+        - Benchmarks
+      summary: Start a distributed LLM GPU benchmarking workflow
       description: |
         Validates the ingest payload, starts a Temporal workflow, and returns
         immediately with a workflow identifier and status URL.
-      operationId: ingestFactoryRequest
+      operationId: ingestBenchmarkRequest
       requestBody:
         required: true
         content:
@@ -92,13 +90,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FactoryIngestAccepted"
+                $ref: "#/components/schemas/BenchmarkIngestAccepted"
               examples:
                 accepted:
                   value:
-                    message: Distributed Model Factory compilation pipeline initiated.
-                    workflow_id: model-factory-llama-3-70b-int4-a1b2c3d4
-                    status_url: /factory/status/model-factory-llama-3-70b-int4-a1b2c3d4
+                    message: Benchmark run initiated.
+                    workflow_id: llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
+                    status_url: /benchmarks/llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
                     precision_mode: INT4
         "500":
           description: Workflow could not be started.
@@ -118,23 +116,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /factory/status/{workflow_id}:
+  /benchmarks/{workflow_id}:
     get:
       tags:
-        - Factory
+        - Benchmarks
       summary: Get workflow status and final result
       description: |
         Queries Temporal for the workflow state. Completed workflows include the
         final pipeline summary returned by the worker.
-      operationId: getFactoryStatus
+      operationId: getBenchmarkStatus
       parameters:
         - name: workflow_id
           in: path
           required: true
-          description: Temporal workflow identifier returned by `/factory/ingest`.
+          description: Temporal workflow identifier returned by `/benchmarks`.
           schema:
             type: string
-          example: model-factory-llama-3-70b-int4-a1b2c3d4
+          example: llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
       responses:
         "200":
           description: Workflow state and optional final pipeline summary.
@@ -145,11 +143,11 @@ paths:
               examples:
                 running:
                   value:
-                    workflow_id: model-factory-llama-3-70b-int4-a1b2c3d4
+                    workflow_id: llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
                     status: RUNNING
                 completed_success:
                   value:
-                    workflow_id: model-factory-llama-3-70b-int4-a1b2c3d4
+                    workflow_id: llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
                     status: COMPLETED
                     pipeline_summary:
                       model: Llama-3-70B
@@ -161,7 +159,7 @@ paths:
                       error_log: ""
                 completed_failure:
                   value:
-                    workflow_id: model-factory-llama-3-70b-fp16-a1b2c3d4
+                    workflow_id: llm-gpu-benchmarking-llama-3-70b-fp16-a1b2c3d4
                     status: COMPLETED
                     pipeline_summary:
                       model: Llama-3-70B
@@ -195,7 +193,8 @@ components:
       description: |
         Model precision mode used by the validation matrix. Lower precision
         reduces the estimated VRAM footprint and changes simulated benchmark
-        results.
+        results. Accepted aliases include `HALF` for `FP16`, `8BIT` for `INT8`,
+        and `4BIT`, `AWQ`, or `INT4-AWQ` for `INT4`.
     ModelIngestRequest:
       type: object
       required:
@@ -228,7 +227,7 @@ components:
             - on-prem
         precision_mode:
           $ref: "#/components/schemas/PrecisionMode"
-    FactoryIngestAccepted:
+    BenchmarkIngestAccepted:
       type: object
       required:
         - message

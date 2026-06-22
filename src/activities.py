@@ -3,11 +3,11 @@ from typing import Any, Dict
 
 from temporalio import activity
 
-from factory_graph import PUBLISH_STATUS, model_factory_graph_pipeline
+from benchmark_graph import PUBLISH_STATUS, llm_gpu_benchmarking_graph_pipeline
 from metrics import (
     ACTIVE_WORKERS,
-    FACTORY_FAILURES,
-    FACTORY_PIPELINE_RUNS,
+    BENCHMARK_FAILURES,
+    BENCHMARK_PIPELINE_RUNS,
     INFERENCE_LATENCY_GAUGE,
     INFERENCE_THROUGHPUT_GAUGE,
     MODEL_ACCURACY_SCORE,
@@ -109,10 +109,10 @@ async def execute_compilation_and_validation(state: dict) -> dict:
             state["target_environment"],
             state.get("precision_mode", "FP16"),
         )
-        final_output = model_factory_graph_pipeline.invoke(state)
+        final_output = llm_gpu_benchmarking_graph_pipeline.invoke(state)
         status_outcome = final_output.get("status", "Unknown")
 
-        FACTORY_PIPELINE_RUNS.labels(
+        BENCHMARK_PIPELINE_RUNS.labels(
             model_name=final_output["model_name"],
             target_gpu=final_output["target_gpu"],
             target_environment=final_output["target_environment"],
@@ -157,7 +157,7 @@ async def execute_compilation_and_validation(state: dict) -> dict:
 
         if status_outcome != PUBLISH_STATUS:
             failure_stage, failure_reason = _failure_stage_and_reason(final_output)
-            FACTORY_FAILURES.labels(
+            BENCHMARK_FAILURES.labels(
                 stage=failure_stage,
                 reason=failure_reason,
                 model=final_output["model_name"],
@@ -185,7 +185,7 @@ async def execute_compilation_and_validation(state: dict) -> dict:
             "error_log": final_output.get("error_message", ""),
         }
     except Exception:
-        LOGGER.exception("factory activity failed unexpectedly")
+        LOGGER.exception("benchmark activity failed unexpectedly")
         raise
     finally:
         ACTIVE_WORKERS.dec()

@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: model-factory-poc-app
+  repository: llm-gpu-benchmarking-app
   tag: latest
   pullPolicy: IfNotPresent
 
@@ -14,7 +14,7 @@ ingress:
   className: ""
   annotations: {}
   hosts:
-    - host: model-factory.localhost
+    - host: llm-gpu-benchmarking.localhost
       paths:
         - path: /
           pathType: Prefix
@@ -41,7 +41,7 @@ worker:
 
 secret:
   create: false
-  name: model-factory-secrets
+  name: llm-gpu-benchmarking-secrets
   nvidiaApiKey: ""
 
 podAnnotations:

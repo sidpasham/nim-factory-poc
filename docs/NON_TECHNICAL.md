@@ -1,4 +1,4 @@
-# Model Factory POC - Non-Technical Overview
+# LLM GPU Benchmarking - Non-Technical Overview
 
 ## Executive Summary
 
@@ -8,7 +8,7 @@ language model is ready to run on a selected hardware target.
 A user submits a model, a hardware choice, a deployment environment, and a
 precision mode. The system checks whether the model is likely to fit, runs a
 simulated benchmark, records the result, and shows operational signals in a
-dashboard.
+dashboarding.
 
 The important change is that the demo no longer treats every request as a
 success. If someone tries to place a very large model on hardware with too
@@ -18,11 +18,11 @@ little memory, the system fails the request for a specific reason:
 VRAM_INSUFFICIENT_EXCEPTION
 ```
 
-That makes the demo closer to how a real production factory would behave.
+That makes the demo closer to how a real production benchmark would behave.
 
 ## What This System Does
 
-In plain language, the system acts like a factory intake desk for AI models:
+In plain language, the system acts like a benchmark intake desk for AI models:
 
 1. A user asks to prepare a model for a target environment.
 2. The system checks the selected hardware profile.
@@ -50,13 +50,13 @@ This is the behavior the validation matrix provides.
 
 | Term | Meaning |
 | --- | --- |
-| model factory | A control plane that prepares model-serving deployments. |
+| LLM GPU benchmarking | A control plane that prepares model-serving deployments. |
 | Model | The AI model a user wants to serve, such as `Llama-3-70B`. |
 | Target hardware | The GPU profile the user wants to run on, such as `H100-80GB` or `A10G-24GB`. |
 | VRAM | GPU memory. Large models need enough VRAM to load and run. |
 | Precision mode | The memory and speed profile selected for the model: `FP16`, `INT8`, or `INT4`. |
 | Validation matrix | A deterministic compatibility check between model size, precision mode, and hardware capacity. |
-| Temporal | The workflow engine that keeps long-running factory work separate from the API request. |
+| Temporal | The workflow engine that keeps long-running benchmark work separate from the API request. |
 | Prometheus | The metrics collector. |
 | Grafana | The dashboard used to view metrics. |
 
@@ -120,7 +120,7 @@ the H100 profile.
 
 The Grafana dashboard is designed to tell an operational story:
 
-- How many factory requests were submitted.
+- How many benchmark requests were submitted.
 - How many succeeded and failed.
 - Which models are being tested.
 - Which hardware profiles are being used.
@@ -129,7 +129,7 @@ The Grafana dashboard is designed to tell an operational story:
 - How long each pipeline stage takes.
 - How many worker jobs are active.
 
-This helps a viewer understand whether the factory is healthy, whether workers
+This helps a viewer understand whether the benchmark is healthy, whether workers
 are busy, and where bottlenecks appear.
 
 ## How The Pieces Fit Together
@@ -139,7 +139,7 @@ are busy, and where bottlenecks appear.
 | FastAPI | Receives user requests and returns workflow IDs. |
 | Temporal | Tracks the long-running workflow. |
 | Worker | Executes the model validation pipeline away from the API process. |
-| LangGraph | Defines the factory stages and routing logic. |
+| LangGraph | Defines the benchmark stages and routing logic. |
 | Validation matrix | Makes the fit/fail decision based on model size, hardware memory, and precision mode. |
 | Prometheus | Collects metrics from the API and worker. |
 | Grafana | Shows dashboards from those metrics. |
@@ -153,8 +153,7 @@ Real in this POC:
 - Worker process separation.
 - Config-backed hardware and deployment profiles.
 - Deterministic validation decisions.
-- Metrics and dashboards.
-- Docker Compose stack.
+- Metrics and dashboard definitions.
 - Local Kubernetes Helm run.
 
 Simulated in this POC:
@@ -167,36 +166,28 @@ Simulated in this POC:
 Optional:
 
 - The project can call a hosted NVIDIA OpenAI-compatible endpoint when
-  `MODEL_FACTORY_VALIDATION_MODE=hosted` and an API key is configured.
+  `LLM_GPU_BENCHMARKING_VALIDATION_MODE=hosted` and an API key is configured.
 
 ## How To Demo It
 
-Start the local stack:
+Start the local Kubernetes stack:
 
 ```bash
-./scripts/local-docker-compose.sh
+./scripts/local-helm-deployment.sh up
 ```
 
 Submit a few requests:
 
 ```bash
-REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
+REQUESTS=30 CONCURRENCY=6 ./scripts/local-helm-deployment.sh load
 ```
 
 Open:
 
 | Tool | URL |
 | --- | --- |
-| API | http://localhost:8000 |
-| Temporal UI | http://localhost:8233 |
-| Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 |
-
-Grafana uses the local demo login:
-
-```text
-admin / admin
-```
+| API | http://llm-gpu-benchmarking.localhost |
+| API docs | http://llm-gpu-benchmarking.localhost/docs |
 
 ## Production Readiness View
 

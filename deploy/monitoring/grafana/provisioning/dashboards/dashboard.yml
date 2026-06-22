@@ -1,9 +1,9 @@
 apiVersion: 1
 
 providers:
-  - name: Model Factory
+  - name: LLM GPU Benchmarking
     orgId: 1
-    folder: Model Factory
+    folder: LLM GPU Benchmarking
     type: file
     disableDeletion: false
     updateIntervalSeconds: 10

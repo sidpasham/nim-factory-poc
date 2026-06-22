@@ -1,6 +1,0 @@
-apiVersion: v2
-name: model-factory
-description: Model Factory control-plane POC for real NVIDIA hosted NIM validation.
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

@@ -1,59 +1,20 @@
 # Local Production Runbook
 
-This runbook treats the local laptop as the production-like environment for the
-Model Factory POC.
+This runbook treats the local laptop as the production-like environment for
+LLM GPU Benchmarking.
 
-## Docker Compose Path
-
-Start:
-
-```bash
-./scripts/local-docker-compose.sh
-```
-
-The start script writes `.runtime.env` with:
-
-```bash
-BASE_URL=http://localhost:8000
-```
-
-Health:
-
-```bash
-source .runtime.env
-curl -sS "${BASE_URL}/health" | jq .
-```
-
-Smoke test:
-
-```bash
-./scripts/smoke-test.sh
-```
-
-Load test:
-
-```bash
-REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
-```
-
-Stop:
-
-```bash
-./scripts/uninstall-docker-compose.sh
-```
-
-## Local Kubernetes Helm Path
+## Local Kubernetes Path
 
 Start:
 
 ```bash
-./scripts/local-helm-deployment.sh
+./scripts/local-helm-deployment.sh up
 ```
 
 The start script writes `.runtime.env` with the ingress URL:
 
 ```bash
-BASE_URL=http://model-factory.localhost
+BASE_URL=http://llm-gpu-benchmarking.localhost
 ```
 
 Health:
@@ -63,28 +24,34 @@ source .runtime.env
 curl -sS "${BASE_URL}/health" | jq .
 ```
 
-Smoke test:
+End-to-end test:
 
 ```bash
-./scripts/smoke-test.sh
+./scripts/local-helm-deployment.sh test
 ```
 
 Load test:
 
 ```bash
-REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
+REQUESTS=30 CONCURRENCY=6 ./scripts/local-helm-deployment.sh load
 ```
 
 Stop release:
 
 ```bash
-./scripts/uninstall-helm-deployment.sh
+./scripts/local-helm-deployment.sh down
 ```
 
 Stop release and delete namespace:
 
 ```bash
-DELETE_NAMESPACE=true ./scripts/uninstall-helm-deployment.sh
+DELETE_NAMESPACE=true ./scripts/local-helm-deployment.sh down
+```
+
+Status:
+
+```bash
+./scripts/local-helm-deployment.sh status
 ```
 
 ## Validation Gate

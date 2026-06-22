@@ -29,7 +29,7 @@ echo "Checking markdown bash examples"
 "${PYTHON_BIN}" - <<'PY'
 from pathlib import Path
 
-for markdown_path in [Path("examples/factory-ingest-curl-examples.md")]:
+for markdown_path in [Path("examples/benchmark-curl-examples.md")]:
     blocks = []
     in_block = False
     current = []
@@ -49,15 +49,15 @@ for markdown_path in [Path("examples/factory-ingest-curl-examples.md")]:
     target.write_text("\n\n".join(blocks) + "\n")
     print(f"wrote {len(blocks)} bash blocks from {markdown_path} to {target}")
 PY
-bash -n /tmp/factory-ingest-curl-examples.sh
+bash -n /tmp/benchmark-curl-examples.sh
 
 echo "Rendering Helm chart"
-helm template model-factory helm/model-factory \
-  --namespace model-factory \
+helm template llm-gpu-benchmarking helm/llm-gpu-benchmarking \
+  --namespace llm-gpu-benchmarking \
   --set ingress.enabled=true \
   --set ingress.className=traefik \
-  --set "ingress.hosts[0].host=model-factory.localhost" \
+  --set "ingress.hosts[0].host=llm-gpu-benchmarking.localhost" \
   --set "ingress.hosts[0].paths[0].path=/" \
-  --set "ingress.hosts[0].paths[0].pathType=Prefix" >/tmp/model-factory-rendered.yaml
+  --set "ingress.hosts[0].paths[0].pathType=Prefix" >/tmp/llm-gpu-benchmarking-rendered.yaml
 
 echo "Validation completed"

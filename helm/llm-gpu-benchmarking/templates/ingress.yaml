@@ -2,9 +2,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "model-factory.fullname" . }}
+  name: {{ include "llm-gpu-benchmarking.fullname" . }}
   labels:
-    {{- include "model-factory.labels" . | nindent 4 }}
+    {{- include "llm-gpu-benchmarking.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -27,7 +27,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "model-factory.fullname" $ }}
+                name: {{ include "llm-gpu-benchmarking.fullname" $ }}
                 port:
                   number: {{ $.Values.service.port }}
           {{- end }}

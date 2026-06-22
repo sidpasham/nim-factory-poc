@@ -14,7 +14,7 @@
         "hosted_validation_mode": "nvidia_hosted_external",
         "validation_scope": [
           "cloud deployment target metadata",
-          "factory calls NVIDIA hosted NIM API",
+          "service calls NVIDIA hosted NIM API",
           "Prometheus labels run as cloud target"
         ]
       }
@@ -34,7 +34,7 @@
         "hosted_validation_mode": "nvidia_hosted_external",
         "validation_scope": [
           "on-prem deployment target metadata",
-          "factory calls NVIDIA hosted NIM API",
+          "service calls NVIDIA hosted NIM API",
           "Prometheus labels run as on-prem target"
         ]
       }
@@ -53,9 +53,9 @@
         "control_plane": "local Kubernetes",
         "hosted_validation_mode": "nvidia_hosted_external",
         "validation_scope": [
-          "factory workload runs as a Kubernetes service",
-          "factory calls NVIDIA hosted NIM API",
-          "Prometheus scrapes factory metrics"
+          "service workload runs as a Kubernetes service",
+          "service calls NVIDIA hosted NIM API",
+          "Prometheus scrapes service metrics"
         ]
       }
     }

@@ -7,7 +7,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from activities import execute_compilation_and_validation
-from workflows import ModelFactoryWorkflow
+from workflows import LlmGpuBenchmarkingWorkflow
 
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -44,13 +44,13 @@ async def main():
     client = await connect_temporal()
     worker = Worker(
         client,
-        task_queue="model-factory-task-queue",
-        workflows=[ModelFactoryWorkflow],
+        task_queue="llm-gpu-benchmarking-task-queue",
+        workflows=[LlmGpuBenchmarkingWorkflow],
         activities=[execute_compilation_and_validation],
         max_concurrent_activities=int(os.getenv("MAX_CONCURRENT_ACTIVITIES", "10")),
     )
 
-    LOGGER.info("Model Factory worker attached to Temporal; metrics_port=%s", metrics_port)
+    LOGGER.info("LLM GPU Benchmarking worker attached to Temporal; metrics_port=%s", metrics_port)
     await worker.run()
 
 

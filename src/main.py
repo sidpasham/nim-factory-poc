@@ -14,7 +14,7 @@ from temporalio.client import Client
 
 from metrics import PIPELINE_DURATION_SECONDS
 from schemas import ModelIngestRequest
-from workflows import ModelFactoryWorkflow
+from workflows import LlmGpuBenchmarkingWorkflow
 
 
 temporal_client: Optional[Client] = None
@@ -31,7 +31,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="Model Factory Control Plane",
+    title="LLM GPU Benchmarking Control Plane",
     lifespan=lifespan,
 )
 
@@ -72,16 +72,16 @@ def health_check():
     }
 
 
-@app.post("/factory/ingest")
-async def trigger_factory_pipeline(request: ModelIngestRequest):
-    """Starts the distributed factory workflow asynchronously through Temporal."""
+@app.post("/benchmarks")
+async def trigger_benchmark_pipeline(request: ModelIngestRequest):
+    """Starts the distributed benchmark workflow asynchronously through Temporal."""
     if temporal_client is None:
         raise HTTPException(status_code=503, detail="Temporal client is not connected")
 
     start_time = time.perf_counter()
     precision_mode = request.precision_mode.value
     workflow_id = (
-        f"model-factory-{_workflow_slug(request.model_name)}-"
+        f"llm-gpu-benchmarking-{_workflow_slug(request.model_name)}-"
         f"{precision_mode.lower()}-{uuid.uuid4().hex[:8]}"
     )
 
@@ -102,10 +102,10 @@ async def trigger_factory_pipeline(request: ModelIngestRequest):
 
     try:
         await temporal_client.start_workflow(
-            ModelFactoryWorkflow.run,
+            LlmGpuBenchmarkingWorkflow.run,
             initial_state,
             id=workflow_id,
-            task_queue="model-factory-task-queue",
+            task_queue="llm-gpu-benchmarking-task-queue",
         )
         duration_seconds = time.perf_counter() - start_time
         PIPELINE_DURATION_SECONDS.labels(
@@ -118,21 +118,21 @@ async def trigger_factory_pipeline(request: ModelIngestRequest):
         ).observe(duration_seconds)
 
         return {
-            "message": "Distributed Model Factory compilation pipeline initiated.",
+            "message": "Distributed LLM GPU Benchmark run initiated.",
             "workflow_id": workflow_id,
-            "status_url": f"/factory/status/{workflow_id}",
+            "status_url": f"/benchmarks/{workflow_id}",
             "precision_mode": precision_mode,
         }
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to start factory pipeline: {exc}",
+            detail=f"Failed to start benchmark pipeline: {exc}",
         ) from exc
 
 
-@app.get("/factory/status/{workflow_id}")
-async def get_factory_status(workflow_id: str):
-    """Queries live status and final result for a factory pipeline."""
+@app.get("/benchmarks/{workflow_id}")
+async def get_benchmark_status(workflow_id: str):
+    """Queries live status and final result for a benchmark pipeline."""
     if temporal_client is None:
         raise HTTPException(status_code=503, detail="Temporal client is not connected")
 

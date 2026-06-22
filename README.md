@@ -1,11 +1,11 @@
-# Model Factory POC
+# LLM GPU Benchmarking
 
-A proof of concept for a distributed model-to-service factory control plane.
+A proof of concept for a distributed LLM GPU benchmark control plane.
 
 The project accepts a model request, selects a target hardware and deployment
 profile, starts a Temporal workflow, executes a LangGraph pipeline in a worker,
-validates hardware fit with a deterministic validation matrix, and exports
-Prometheus metrics for a Grafana dashboard.
+validates hardware fit with a deterministic validation matrix, and exposes
+Prometheus metrics for dashboarding.
 
 This repository treats a local laptop as the production-like environment for the
 POC. The control-plane boundaries, deployment paths, validation decisions,
@@ -21,14 +21,13 @@ GPU provisioning and model-service artifact publishing remain simulated.
 | Pipeline orchestration | LangGraph state machine inside the worker activity |
 | Hardware validation | Deterministic validation matrix by default |
 | Hosted runtime validation | Optional NVIDIA-hosted OpenAI-compatible validation mode |
-| Observability | Prometheus metrics and a provisioned Grafana dashboard |
-| Local deployment | Docker Compose with API, worker, Temporal, Prometheus, and Grafana |
-| Local Kubernetes deployment | Helm chart with ingress for Rancher Desktop or another local cluster |
+| Observability | Prometheus metrics and a provisioned Grafana dashboard JSON |
+| Local deployment | Helm chart with ingress for Rancher Desktop or another local cluster |
 | Production readiness | Local-prod POC; see remaining gaps below |
 
 ## Problem Statement
 
-A model factory needs to answer an operational question before spending real GPU
+An LLM GPU benchmarking service needs to answer an operational question before spending real GPU
 time: can this model run on this target hardware, with this precision mode, in
 this deployment environment?
 
@@ -43,13 +42,13 @@ result, increment Prometheus counters, and show up in Grafana.
 - Keep API ingestion asynchronous so clients are not blocked by compile and
   benchmark phases.
 - Use Temporal for durable workflow orchestration and a separate worker process
-  for factory execution.
+  for benchmark execution.
 - Use LangGraph to keep pipeline stages explicit and testable.
 - Replace hardcoded success responses with a validation matrix that reacts to
   model size, target VRAM, and precision mode.
 - Emit metrics that explain throughput, bottlenecks, failure reasons, worker
   activity, VRAM usage, and precision-mode impact.
-- Keep the project runnable locally with one Docker Compose command.
+- Keep the project runnable locally through one Kubernetes Helm lifecycle script.
 
 ## Non-Goals
 
@@ -63,48 +62,37 @@ result, increment Prometheus counters, and show up in Grafana.
 
 ## Architecture
 
-```text
-Client
-  |
-  | POST /factory/ingest
-  v
-FastAPI control plane
-  |
-  | starts workflow and returns workflow_id
-  v
-Temporal server
-  |
-  | schedules work on task queue
-  v
-Temporal worker
-  |
-  | runs one activity
-  v
-LangGraph factory pipeline
-  |
-  +-- discover_infrastructure
-  |     reads src/config/hardware_profiles.json
-  |     reads src/config/deployment_targets.json
-  |
-  +-- record_precision_profile
-  |     records INT8 and INT4 quantization metadata
-  |
-  +-- compile_validation_matrix_plan
-  |     estimates model footprint and checks target VRAM
-  |
-  +-- run_validation_harness
-  |     simulates deterministic benchmark results
-  |
-  +-- route_validation_results
-        |
-        +-- compile_and_publish_model_service -> Model_Service_Ready_To_Deploy
-        +-- handle_failure          -> Failed
+```mermaid
+flowchart LR
+    client[Client] -->|POST /benchmarks| api[FastAPI control plane]
+    api -->|start workflow| temporal[Temporal server]
+    api -->|workflow_id + status_url| client
+    temporal -->|llm-gpu-benchmarking-task-queue| worker[Temporal worker]
+    worker -->|run activity| graph[LangGraph benchmark pipeline]
 
-Prometheus scrapes:
-  - API process:    app:8000/metrics
-  - Worker process: worker:9000/
+    graph --> discovery[discover_infrastructure]
+    discovery --> precision[record_precision_profile]
+    precision --> compile[compile_validation_matrix_plan]
+    compile --> benchmark[run_validation_harness]
+    benchmark --> route[route_validation_results]
+    route -->|success and TPS threshold met| publish[compile_and_publish_model_service]
+    route -->|validation failure| failure[handle_failure]
 
-Grafana reads the provisioned dashboard from deploy/monitoring/grafana/dashboards/
+    publish --> ready[Model_Service_Ready_To_Deploy]
+    failure --> failed[Failed]
+
+    hardware[(hardware_profiles.json)] --> discovery
+    targets[(deployment_targets.json)] --> discovery
+    matrix[(validation_matrix.py)] --> compile
+    matrix --> benchmark
+```
+
+```mermaid
+flowchart TB
+    apiMetrics["API metrics<br/>app:8000/metrics"] --> prometheus[Prometheus-compatible scraper]
+    workerMetrics["Worker metrics<br/>worker:9000/"] --> prometheus
+    prometheus --> grafana[Grafana]
+    dashboardFile[(deploy/monitoring/grafana/dashboards/dashboard.json)] --> grafana
 ```
 
 ## Component Responsibilities
@@ -115,8 +103,8 @@ Grafana reads the provisioned dashboard from deploy/monitoring/grafana/dashboard
 | Request schema | `src/schemas.py` | Defines `ModelIngestRequest` and `PrecisionMode`. |
 | Workflow | `src/workflows.py` | Defines the Temporal workflow wrapper and retry policy. |
 | Worker | `src/worker.py` | Connects to Temporal, starts worker metrics, and executes queued activities. |
-| Activity | `src/activities.py` | Runs the factory pipeline and records Prometheus metrics. |
-| Factory graph | `src/factory_graph.py` | Defines the LangGraph stages and success/failure routing. |
+| Activity | `src/activities.py` | Runs the benchmark pipeline and records Prometheus metrics. |
+| Benchmark graph | `src/benchmark_graph.py` | Defines the LangGraph stages and success/failure routing. |
 | Validation matrix | `src/validation_matrix.py` | Estimates VRAM fit and deterministic benchmark output. |
 | Provisioning facade | `src/mcp_provisioning.py` | Loads hardware/deployment profiles and chooses validation backend. |
 | Hosted runtime client | `src/nim_runtime_client.py` | Optional OpenAI-compatible NVIDIA hosted validation client. |
@@ -130,26 +118,53 @@ Grafana reads the provisioned dashboard from deploy/monitoring/grafana/dashboard
 | `src/config/` | Hardware, deployment, and hosted-model profile JSON. |
 | `test/` | Unit tests for schemas, graph routing, provisioning, and hosted validation. |
 | `examples/` | Curl examples and validation-matrix load generator. |
-| `docs/` | Local production runbook and operator-facing documentation. |
-| `scripts/` | Local run, uninstall, smoke-test, load-test, and validation scripts. |
+| `docs/` | Local production runbook, non-technical overview, and operator-facing documentation. |
+| `scripts/` | Kubernetes lifecycle, test, load, and validation scripts. |
 | `Dockerfile` | Application image definition used by API and worker containers. |
 | `.dockerignore` | Root Docker build-context ignore rules. |
-| `docker-compose.yml` | Local Docker Compose stack for API, worker, Temporal, Prometheus, and Grafana. |
-| `helm/model-factory/` | Local Kubernetes Helm chart with API, worker, Temporal, service, and ingress resources. |
+| `helm/llm-gpu-benchmarking/` | Local Kubernetes Helm chart with API, worker, Temporal, service, and ingress resources. |
 | `deploy/monitoring/grafana/` | Provisioned Grafana datasource and dashboard. |
-| `deploy/monitoring/prometheus/` | Prometheus scrape configuration for Docker Compose. |
 | `openapi.yaml` | Checked-in API contract. |
 
 Runtime commands use `PYTHONPATH=src` and module names such as `main`,
-`worker`, and `factory_graph`.
+`worker`, and `benchmark_graph`.
 
 ## Request Lifecycle
 
-1. A client submits `POST /factory/ingest`.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant A as FastAPI
+    participant T as Temporal
+    participant W as Worker
+    participant G as LangGraph
+
+    C->>A: POST /benchmarks
+    A->>A: Validate payload with Pydantic
+    A->>T: Start workflow
+    A-->>C: workflow_id and status_url
+    T->>W: Schedule activity
+    W->>G: Execute benchmark pipeline
+    G->>G: Discover profiles
+    G->>G: Check precision and VRAM fit
+    alt VRAM insufficient
+        G-->>W: Failed with VRAM_INSUFFICIENT_EXCEPTION
+    else Fit succeeds
+        G->>G: Run deterministic benchmark
+        G-->>W: Deployable or failed by TPS threshold
+    end
+    W-->>T: Final pipeline summary
+    C->>A: GET /benchmarks/{workflow_id}
+    A->>T: Query workflow result
+    A-->>C: Running or completed status
+```
+
+1. A client submits `POST /benchmarks`.
 2. FastAPI validates the payload with Pydantic.
 3. FastAPI creates a unique Temporal `workflow_id`.
 4. Temporal stores and schedules the workflow.
-5. A worker picks up the workflow activity from `model-factory-task-queue`.
+5. A worker picks up the workflow activity from `llm-gpu-benchmarking-task-queue`.
 6. The worker invokes the LangGraph pipeline.
 7. The graph discovers hardware and deployment metadata from JSON config.
 8. The graph records a quantized precision profile for `INT8` or `INT4`.
@@ -160,7 +175,7 @@ Runtime commands use `PYTHONPATH=src` and module names such as `main`,
 12. The graph routes the run to publish or failure based on validation success
     and the configured TPS threshold.
 13. The activity records metrics and returns the final pipeline summary.
-14. A client polls `GET /factory/status/{workflow_id}` for completion.
+14. A client polls `GET /benchmarks/{workflow_id}` for completion.
 
 ## API Contract
 
@@ -173,13 +188,13 @@ openapi.yaml
 When the API is running, FastAPI also exposes interactive docs at:
 
 ```text
-http://localhost:8000/docs
+http://llm-gpu-benchmarking.localhost/docs
 ```
 
 ### Ingest
 
 ```http
-POST /factory/ingest
+POST /benchmarks
 Content-Type: application/json
 ```
 
@@ -205,9 +220,9 @@ Example response:
 
 ```json
 {
-  "message": "Distributed Model Factory compilation pipeline initiated.",
-  "workflow_id": "model-factory-llama-3-70b-fp16-a1b2c3d4",
-  "status_url": "/factory/status/model-factory-llama-3-70b-fp16-a1b2c3d4",
+  "message": "Benchmark run initiated.",
+  "workflow_id": "llm-gpu-benchmarking-llama-3-70b-fp16-a1b2c3d4",
+  "status_url": "/benchmarks/llm-gpu-benchmarking-llama-3-70b-fp16-a1b2c3d4",
   "precision_mode": "FP16"
 }
 ```
@@ -215,14 +230,14 @@ Example response:
 ### Status
 
 ```http
-GET /factory/status/{workflow_id}
+GET /benchmarks/{workflow_id}
 ```
 
 While running:
 
 ```json
 {
-  "workflow_id": "model-factory-llama-3-70b-fp16-a1b2c3d4",
+  "workflow_id": "llm-gpu-benchmarking-llama-3-70b-fp16-a1b2c3d4",
   "status": "RUNNING"
 }
 ```
@@ -231,7 +246,7 @@ After completion:
 
 ```json
 {
-  "workflow_id": "model-factory-llama-3-70b-fp16-a1b2c3d4",
+  "workflow_id": "llm-gpu-benchmarking-llama-3-70b-fp16-a1b2c3d4",
   "status": "COMPLETED",
   "pipeline_summary": {
     "model": "Llama-3-70B",
@@ -250,7 +265,7 @@ After completion:
 The default runtime mode is deterministic local validation:
 
 ```bash
-MODEL_FACTORY_VALIDATION_MODE=validation
+LLM_GPU_BENCHMARKING_VALIDATION_MODE=validation
 ```
 
 The validation matrix answers two questions:
@@ -258,6 +273,23 @@ The validation matrix answers two questions:
 - Compile fit: does the model weight footprint fit into the target VRAM?
 - Benchmark expectation: if it fits, what throughput, latency, VRAM use, and
   accuracy should this target produce for the selected precision mode?
+
+```mermaid
+flowchart TD
+    request[Model ingest request] --> profiles[Resolve hardware and deployment profiles]
+    profiles --> known{Profiles known?}
+    known -->|No| configError[Fail with configuration error]
+    known -->|Yes| precision[Normalize precision mode]
+    precision --> estimate[Estimate required VRAM]
+    estimate --> fit{Required VRAM <= available VRAM?}
+    fit -->|No| oom[Fail: VRAM_INSUFFICIENT_EXCEPTION]
+    fit -->|Yes| benchmark[Run deterministic benchmark simulation]
+    benchmark --> success{Benchmark success?}
+    success -->|No| benchmarkFail[Fail: benchmark]
+    success -->|Yes| threshold{TPS > threshold?}
+    threshold -->|No| lowTps[Fail: low throughput]
+    threshold -->|Yes| deployable[Ready to deploy]
+```
 
 ### Core Business Logic
 
@@ -281,12 +313,12 @@ The pipeline makes that decision in this order:
    latency, VRAM utilization, and accuracy from the model size, hardware profile,
    and precision profile.
 6. Publish routing requires both `success=true` and
-   `tokens_per_second > MODEL_FACTORY_MINIMUM_TPS_THRESHOLD`. The default threshold is
-   `1200` TPS.
+   `tokens_per_second > LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD`. The default threshold is
+   `100` TPS.
 7. Failure handling chooses the most specific reason available: compile error,
    benchmark error, unsuccessful benchmark, or low throughput.
 8. The worker records counters, histograms, gauges, stage durations, and the
-   final summary returned by `GET /factory/status/{workflow_id}`.
+   final summary returned by `GET /benchmarks/{workflow_id}`.
 
 Decision table:
 
@@ -481,7 +513,7 @@ The failure result includes:
 - `vram_utilization_ratio`
 - `precision_mode`
 
-The worker records this in `model_factory_failures_total` with labels similar to:
+The worker records this in `llm_gpu_benchmarking_failures_total` with labels similar to:
 
 ```text
 stage="compile", reason="oom", model="Llama-3-70B"
@@ -516,45 +548,86 @@ Temporal provides the distributed execution boundary:
 
 - The API process accepts requests and starts workflows.
 - The Temporal server tracks workflow state and hands work to workers.
-- The worker process runs the factory activity.
+- The worker process runs the benchmark activity.
 - The activity invokes the LangGraph pipeline.
 - The status endpoint asks Temporal for workflow state and final result.
 
+```mermaid
+flowchart LR
+    subgraph API_Process[API process]
+        ingest[Ingest endpoint]
+        status[Status endpoint]
+    end
+
+    subgraph Temporal_Runtime[Temporal runtime]
+        workflow[Workflow state]
+        queue[Task queue]
+    end
+
+    subgraph Worker_Process[Worker process]
+        activity[Benchmark activity]
+        pipeline[LangGraph pipeline]
+    end
+
+    ingest --> workflow
+    workflow --> queue
+    queue --> activity
+    activity --> pipeline
+    pipeline --> activity
+    activity --> workflow
+    status --> workflow
+```
+
 Current Temporal settings:
 
-- Task queue: `model-factory-task-queue`
+- Task queue: `llm-gpu-benchmarking-task-queue`
 - Activity timeout: 5 minutes
 - Retry attempts: 3
 - Non-retryable error types: `UnsupportedProvisioningTargetError`, `ValueError`
 
-The Docker Compose stack uses Temporal development mode for local demos. A
-production deployment should use a real Temporal cluster or Temporal Cloud with
-persistent storage, namespace isolation, TLS, and operational runbooks.
+The local Kubernetes chart uses Temporal development mode for demos. A production
+deployment should use a real Temporal cluster or Temporal Cloud with persistent
+storage, namespace isolation, TLS, and operational runbooks.
 
 ## Observability Design
 
-Prometheus scrapes both the API and worker:
+The API and worker expose Prometheus-format metrics. In Kubernetes, the chart
+adds scrape annotations so a compatible Prometheus setup can collect both
+targets:
+
+```mermaid
+flowchart LR
+    api[FastAPI process] -->|/metrics| prometheus[Prometheus-compatible scraper]
+    worker[Worker process] -->|:9000/| prometheus
+    prometheus --> dashboards[Grafana dashboards]
+    dashboards --> operator[Operator]
+
+    api -->|ingest/status counters| apiSignals[Control-plane signals]
+    worker -->|stage, failure, VRAM, benchmark metrics| workerSignals[Validation signals]
+    apiSignals --> prometheus
+    workerSignals --> prometheus
+```
 
 | Job | Target | Purpose |
 | --- | --- | --- |
-| `model-factory-control-plane` | `app:8000/metrics` | API ingest and control-plane metrics |
-| `model-factory-worker` | `worker:9000/` | Worker, pipeline, validation, and benchmark metrics |
+| `llm-gpu-benchmarking-control-plane` | `app:8000/metrics` | API ingest and control-plane metrics |
+| `llm-gpu-benchmarking-worker` | `worker:9000/` | Worker, pipeline, validation, and benchmark metrics |
 
 Key metrics:
 
 | Metric | Type | Labels | Purpose |
 | --- | --- | --- | --- |
-| `model_factory_pipeline_runs_total` | Counter | `model_name`, `target_gpu`, `target_environment`, `status` | Counts completed runs by outcome. |
-| `model_factory_validated_throughput_tps` | Histogram | `model_name`, `target_gpu`, `target_environment`, `status` | Captures validation throughput. |
-| `model_factory_validated_latency_ms` | Histogram | `model_name`, `target_gpu`, `target_environment`, `status` | Captures validation latency. |
-| `model_factory_pipeline_duration_seconds` | Histogram | `stage`, `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Tracks stage duration from ingest through publish/failure. |
-| `model_factory_failures_total` | Counter | `stage`, `reason`, `model` | Counts high-signal failures such as compile OOM. |
-| `model_factory_active_workers` | Gauge | none | Tracks currently active worker jobs per worker process. |
-| `model_factory_validation_matrix_benchmark_tps` | Histogram | `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Precision-aware validation throughput. |
-| `model_factory_validation_matrix_benchmark_latency_ms` | Histogram | `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Precision-aware validation latency. |
-| `model_factory_vram_required_gb` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Estimated model VRAM requirement. |
-| `model_factory_vram_capacity_gb` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Target VRAM capacity. |
-| `model_factory_validation_matrix_accuracy_score` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Simulated precision-mode quality score. |
+| `llm_gpu_benchmarking_pipeline_runs_total` | Counter | `model_name`, `target_gpu`, `target_environment`, `status` | Counts completed runs by outcome. |
+| `llm_gpu_benchmarking_validated_throughput_tps` | Histogram | `model_name`, `target_gpu`, `target_environment`, `status` | Captures validation throughput. |
+| `llm_gpu_benchmarking_validated_latency_ms` | Histogram | `model_name`, `target_gpu`, `target_environment`, `status` | Captures validation latency. |
+| `llm_gpu_benchmarking_pipeline_duration_seconds` | Histogram | `stage`, `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Tracks stage duration from ingest through publish/failure. |
+| `llm_gpu_benchmarking_failures_total` | Counter | `stage`, `reason`, `model` | Counts high-signal failures such as compile OOM. |
+| `llm_gpu_benchmarking_active_workers` | Gauge | none | Tracks currently active worker jobs per worker process. |
+| `llm_gpu_benchmarking_validation_matrix_benchmark_tps` | Histogram | `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Precision-aware validation throughput. |
+| `llm_gpu_benchmarking_validation_matrix_benchmark_latency_ms` | Histogram | `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Precision-aware validation latency. |
+| `llm_gpu_benchmarking_vram_required_gb` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Estimated model VRAM requirement. |
+| `llm_gpu_benchmarking_vram_capacity_gb` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Target VRAM capacity. |
+| `llm_gpu_benchmarking_validation_matrix_accuracy_score` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Simulated precision-mode quality score. |
 
 Provisioned dashboard:
 
@@ -562,10 +635,10 @@ Provisioned dashboard:
 deploy/monitoring/grafana/dashboards/dashboard.json
 ```
 
-The dashboard combines factory-level and validation-matrix panels in one view.
+The dashboard combines benchmark-level and validation-matrix panels in one view.
 It is designed to answer:
 
-- How many factory runs succeeded or failed?
+- How many benchmark runs succeeded or failed?
 - Which models, hardware targets, and environments are being exercised?
 - Which pipeline stages are bottlenecks?
 - Are failures mostly compile-time VRAM failures or benchmark failures?
@@ -575,29 +648,19 @@ It is designed to answer:
 
 ## Service URLs
 
-Docker Compose exposes local service ports directly on the host:
-
-| Service | URL | Notes |
-| --- | --- | --- |
-| API | http://localhost:8000 | FastAPI control plane |
-| API health | http://localhost:8000/health | Readiness check |
-| API metrics | http://localhost:8000/metrics | Prometheus scrape endpoint |
-| Temporal UI | http://localhost:8233 | Workflow execution history |
-| Prometheus | http://localhost:9090 | Local metrics store |
-| Grafana | http://localhost:3000 | Login with `admin` / `admin` |
-
 The local Kubernetes Helm path exposes the API through ingress:
 
 | Service | URL | Notes |
 | --- | --- | --- |
-| API ingress | http://model-factory.localhost | FastAPI control plane through Kubernetes ingress |
-| API health | http://model-factory.localhost/health | Readiness check through ingress |
-| API metrics | http://model-factory.localhost/metrics | API metrics through ingress |
-| Kubernetes service | `svc/model-factory` in namespace `model-factory` | Internal `ClusterIP` service on port `8000` |
-| Temporal service | `svc/model-factory-temporal` in namespace `model-factory` | Internal service on ports `7233` and `8233` |
-| Worker deployment | `deployment/model-factory-worker` in namespace `model-factory` | Worker metrics are scraped inside the cluster on port `9000` |
+| API ingress | http://llm-gpu-benchmarking.localhost | FastAPI control plane through Kubernetes ingress |
+| API health | http://llm-gpu-benchmarking.localhost/health | Readiness check through ingress |
+| API metrics | http://llm-gpu-benchmarking.localhost/metrics | API metrics through ingress |
+| Kubernetes service | `svc/llm-gpu-benchmarking` in namespace `llm-gpu-benchmarking` | Internal `ClusterIP` service on port `8000` |
+| Temporal service | `svc/llm-gpu-benchmarking-temporal` in namespace `llm-gpu-benchmarking` | Internal service on ports `7233` and `8233` |
+| Worker deployment | `deployment/llm-gpu-benchmarking-worker` in namespace `llm-gpu-benchmarking` | Worker metrics are scraped inside the cluster on port `9000` |
 
 For a compact command-focused runbook, see `docs/OPERATIONS.md`.
+For a non-technical project overview, see `docs/NON_TECHNICAL.md`.
 
 ## Local Tooling Prerequisites
 
@@ -605,42 +668,14 @@ Install these tools before running the local production-like paths:
 
 | Tool | Used by |
 | --- | --- |
-| Docker-compatible runtime with Compose | Local Docker Compose stack and local image builds for Helm |
+| Docker-compatible runtime | Local image builds for Helm |
 | Kubernetes cluster, such as Rancher Desktop | Local Kubernetes Helm deployment |
 | `kubectl` | Namespace, rollout, and service inspection |
 | `helm` | Kubernetes chart install and upgrade |
-| `jq` | Command-line JSON output formatting in smoke tests and examples |
+| `jq` | Command-line JSON output formatting in lifecycle tests and examples |
 | Python 3.12+ | Unit tests and load generator |
 
-## Local Run with Docker Compose
-
-Docker Compose is the fastest way to run the full local demo. It starts the API,
-worker, Temporal, Prometheus, and Grafana as local containers from
-`docker-compose.yml`.
-
-Use Docker Compose when you want to develop or demo the control plane on one
-machine without creating Kubernetes objects.
-
-Start the stack:
-
-```bash
-./scripts/local-docker-compose.sh
-```
-
-The script creates `.env` from `.env.example` if `.env` does not exist, writes
-`.runtime.env` with the active local URLs, then runs:
-
-```bash
-docker compose --env-file .env -f docker-compose.yml up --build
-```
-
-Stop and remove the Docker Compose stack:
-
-```bash
-./scripts/uninstall-docker-compose.sh
-```
-
-## Local Kubernetes Run with Helm
+## Local Kubernetes Run
 
 Kubernetes is included to show how the same control-plane pieces run as cluster
 workloads. In this project, Kubernetes runs the API, worker, Temporal demo
@@ -652,14 +687,14 @@ pod configuration, worker/API separation, environment variables, secrets, and
 Prometheus scrape annotations.
 
 Helm is used because it packages the Kubernetes YAML into a reusable chart under
-`helm/model-factory`. Instead of applying many individual manifests by hand,
+`helm/llm-gpu-benchmarking`. Instead of applying many individual manifests by hand,
 one `helm upgrade --install` command renders the templates with values from
 `values.yaml` and installs or updates the whole release consistently.
 
-Start your local Kubernetes cluster, then deploy with Helm:
+Start your local Kubernetes cluster, then deploy with the lifecycle script:
 
 ```bash
-./scripts/local-helm-deployment.sh
+./scripts/local-helm-deployment.sh up
 ```
 
 The script:
@@ -667,23 +702,33 @@ The script:
 - verifies Kubernetes access with `kubectl cluster-info` and `kubectl get nodes`
 - creates `.env` from `.env.example` if `.env` does not exist
 - loads local config values from `.env`
-- builds the local app image with Docker Compose
-- creates the `model-factory` namespace
-- creates the optional `model-factory-secrets` secret when `NVIDIA_API_KEY` is set
+- builds the local app image with `docker build`
+- creates the `llm-gpu-benchmarking` namespace
+- creates the optional `llm-gpu-benchmarking-secrets` secret when `NVIDIA_API_KEY` is set
 - installs or upgrades the Helm release with ingress enabled
 - waits for API, worker, and Temporal deployments to roll out
 - checks API health through ingress
-- writes `.runtime.env` with `BASE_URL=http://model-factory.localhost` or your
+- writes `.runtime.env` with `BASE_URL=http://llm-gpu-benchmarking.localhost` or your
   custom ingress host
+
+Lifecycle commands:
+
+| Command | Purpose |
+| --- | --- |
+| `./scripts/local-helm-deployment.sh up` | Build the image, install or upgrade Helm resources, wait for rollout, and check health. |
+| `./scripts/local-helm-deployment.sh status` | Show Helm release status, Kubernetes workloads, and API health. |
+| `./scripts/local-helm-deployment.sh test` | Run one end-to-end benchmark workflow and wait for completion. |
+| `./scripts/local-helm-deployment.sh load` | Submit multiple benchmark workflows for metrics and dashboard validation. |
+| `./scripts/local-helm-deployment.sh down` | Uninstall the Helm release. |
 
 Optional overrides:
 
 ```bash
-NAMESPACE=model-factory \
-RELEASE=model-factory \
+NAMESPACE=llm-gpu-benchmarking \
+RELEASE=llm-gpu-benchmarking \
 INGRESS_CLASS=traefik \
-INGRESS_HOST=model-factory.localhost \
-./scripts/local-helm-deployment.sh
+INGRESS_HOST=llm-gpu-benchmarking.localhost \
+./scripts/local-helm-deployment.sh up
 ```
 
 With ingress enabled, Kubernetes keeps the API service as an internal
@@ -700,7 +745,7 @@ curl -sS "${BASE_URL}/health" | jq .
 Submit a request through ingress:
 
 ```bash
-curl -sS -X POST "${BASE_URL}/factory/ingest" \
+curl -sS -X POST "${BASE_URL}/benchmarks" \
   -H "Content-Type: application/json" \
   -d '{"model_name":"Llama-3-70B","target_gpu":"H100-80GB","target_environment":"kubernetes","precision_mode":"INT4"}' \
   | jq .
@@ -709,13 +754,19 @@ curl -sS -X POST "${BASE_URL}/factory/ingest" \
 To stop the Kubernetes release:
 
 ```bash
-./scripts/uninstall-helm-deployment.sh
+./scripts/local-helm-deployment.sh down
 ```
 
 To also remove the namespace:
 
 ```bash
-DELETE_NAMESPACE=true ./scripts/uninstall-helm-deployment.sh
+DELETE_NAMESPACE=true ./scripts/local-helm-deployment.sh down
+```
+
+To inspect the current release and API health:
+
+```bash
+./scripts/local-helm-deployment.sh status
 ```
 
 ## Send Sample Requests
@@ -731,7 +782,7 @@ echo "${BASE_URL}"
 Successful fit with INT4 on H100:
 
 ```bash
-curl -sS -X POST "${BASE_URL}/factory/ingest" \
+curl -sS -X POST "${BASE_URL}/benchmarks" \
   -H "Content-Type: application/json" \
   -d '{"model_name":"Llama-3-70B","target_gpu":"H100-80GB","target_environment":"kubernetes","precision_mode":"INT4"}' \
   | jq .
@@ -740,7 +791,7 @@ curl -sS -X POST "${BASE_URL}/factory/ingest" \
 Intentional VRAM failure with FP16 on A10G:
 
 ```bash
-curl -sS -X POST "${BASE_URL}/factory/ingest" \
+curl -sS -X POST "${BASE_URL}/benchmarks" \
   -H "Content-Type: application/json" \
   -d '{"model_name":"Llama-3-70B","target_gpu":"A10G-24GB","target_environment":"kubernetes","precision_mode":"FP16"}' \
   | jq .
@@ -749,7 +800,7 @@ curl -sS -X POST "${BASE_URL}/factory/ingest" \
 Demo model on GB200:
 
 ```bash
-curl -sS -X POST "${BASE_URL}/factory/ingest" \
+curl -sS -X POST "${BASE_URL}/benchmarks" \
   -H "Content-Type: application/json" \
   -d '{"model_name":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","target_gpu":"NVIDIA GB200","target_environment":"kubernetes","precision_mode":"INT8"}' \
   | jq .
@@ -758,53 +809,45 @@ curl -sS -X POST "${BASE_URL}/factory/ingest" \
 More examples:
 
 ```text
-examples/factory-ingest-curl-examples.md
+examples/benchmark-curl-examples.md
 ```
 
-## Smoke Test
+## End-To-End Test
 
 Run a single end-to-end workflow and poll until Temporal completes it:
 
 ```bash
-./scripts/smoke-test.sh
+./scripts/local-helm-deployment.sh test
 ```
 
-`scripts/smoke-test.sh` reads `.runtime.env` automatically. Override `BASE_URL`
-only when testing a non-default endpoint:
+The `test` command reads `.runtime.env` automatically. Override `BASE_URL` only
+when testing a non-default endpoint:
 
 ```bash
-BASE_URL=http://custom-host.localhost ./scripts/smoke-test.sh
+BASE_URL=http://custom-host.localhost ./scripts/local-helm-deployment.sh test
 ```
 
-## Generate Dashboard Load
+## Generate Load
 
-After Docker Compose or the local Kubernetes ingress path is running:
+After the local Kubernetes ingress path is running:
 
 ```bash
-REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
+REQUESTS=30 CONCURRENCY=6 ./scripts/local-helm-deployment.sh load
 ```
 
-`scripts/load-test.sh` also reads `.runtime.env` automatically. Override
-`BASE_URL` only when needed:
+The `load` command also reads `.runtime.env` automatically. Override `BASE_URL`
+only when needed:
 
 ```bash
-BASE_URL=http://custom-host.localhost REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
+BASE_URL=http://custom-host.localhost REQUESTS=30 CONCURRENCY=6 ./scripts/local-helm-deployment.sh load
 ```
-
-Then open Grafana:
-
-```text
-http://localhost:3000
-```
-
-Use `admin` / `admin` for the local demo login.
 
 ## Optional Hosted NIM Validation
 
 The hosted validation path is opt-in:
 
 ```bash
-MODEL_FACTORY_VALIDATION_MODE=hosted
+LLM_GPU_BENCHMARKING_VALIDATION_MODE=hosted
 NIM_BASE_URL=https://integrate.api.nvidia.com/v1
 NVIDIA_API_KEY=your-nvidia-api-key
 NIM_TIMEOUT_SECONDS=30
@@ -825,13 +868,13 @@ Runtime environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MODEL_FACTORY_VALIDATION_MODE` | `validation` | `validation` for deterministic local validation, `hosted` for NVIDIA hosted calls. |
-| `MODEL_FACTORY_MINIMUM_TPS_THRESHOLD` | `100` in `.env.example` | Minimum TPS required for publish routing. |
+| `LLM_GPU_BENCHMARKING_VALIDATION_MODE` | `validation` | `validation` for deterministic local validation, `hosted` for NVIDIA hosted calls. |
+| `LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD` | `100` in `.env.example` | Minimum TPS required for publish routing. |
 | `NIM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | Base URL for hosted OpenAI-compatible validation. |
 | `NVIDIA_API_KEY` | empty | Bearer token for hosted validation. |
 | `NIM_TIMEOUT_SECONDS` | `30` | HTTP timeout for hosted validation. |
 | `NIM_MODEL_PROFILES_PATH` | `src/config/model_profiles.json` | Optional model payload profile override. |
-| `TEMPORAL_ADDRESS` | `temporal:7233` in Compose | Temporal frontend address used by API and worker. |
+| `TEMPORAL_ADDRESS` | `llm-gpu-benchmarking-temporal:7233` in Helm | Temporal frontend address used by API and worker. |
 | `TEMPORAL_CONNECT_ATTEMPTS` | `3` API, `12` worker | Connection retry attempts at startup. |
 | `METRICS_PORT` | `9000` | Worker metrics listener port. |
 | `MAX_CONCURRENT_ACTIVITIES` | `10` | Worker activity concurrency. |
@@ -870,11 +913,11 @@ The current project has local production-like structure in these areas:
 - Worker-process execution for long-running stages.
 - Config-backed hardware and deployment profiles.
 - Deterministic validation failures with specific error codes.
-- High-signal Prometheus metrics and a Grafana dashboard.
+- High-signal Prometheus metrics and a Grafana dashboard definition.
 - Kubernetes chart for API, worker, Temporal demo components, services, and
   ingress.
-- Operational scripts for install, uninstall, smoke tests, load tests, and local
-  validation.
+- Operational scripts for install, uninstall, end-to-end tests, load generation,
+  and local validation.
 - Pinned Python runtime dependencies.
 - Non-root runtime container image.
 
