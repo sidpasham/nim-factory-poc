@@ -734,9 +734,7 @@ Lifecycle commands:
 | --- | --- |
 | `./scripts/local-helm-deployment.sh up` | Build the image, install or upgrade Helm resources, wait for rollout, and check health. |
 | `./scripts/local-helm-deployment.sh status` | Show Helm release status, Kubernetes workloads, and API health. |
-| `./scripts/local-helm-deployment.sh test` | Run one end-to-end benchmark workflow and wait for completion. |
-| `./scripts/local-helm-deployment.sh load` | Submit multiple benchmark workflows for metrics and dashboard validation. |
-| `./scripts/local-helm-deployment.sh down` | Uninstall the Helm release. |
+| `./scripts/local-helm-deployment.sh down` | Uninstall the Helm release and delete the namespace. |
 
 Optional overrides:
 
@@ -768,16 +766,10 @@ curl -sS -X POST "${BASE_URL}/benchmarks" \
   | jq .
 ```
 
-To stop the Kubernetes release:
+To stop the Kubernetes release and delete its namespace:
 
 ```bash
 ./scripts/local-helm-deployment.sh down
-```
-
-To also remove the namespace:
-
-```bash
-DELETE_NAMESPACE=true ./scripts/local-helm-deployment.sh down
 ```
 
 To inspect the current release and API health:
@@ -834,14 +826,14 @@ examples/benchmark-curl-examples.md
 Run a single end-to-end workflow and poll until Temporal completes it:
 
 ```bash
-./scripts/local-helm-deployment.sh test
+./scripts/load-test.sh test
 ```
 
-The `test` command reads `.runtime.env` automatically. Override `BASE_URL` only
+The test command reads `.runtime.env` automatically. Override `BASE_URL` only
 when testing a non-default endpoint:
 
 ```bash
-BASE_URL=http://custom-host.localhost ./scripts/local-helm-deployment.sh test
+BASE_URL=http://custom-host.localhost ./scripts/load-test.sh test
 ```
 
 ## Generate Load
@@ -849,14 +841,14 @@ BASE_URL=http://custom-host.localhost ./scripts/local-helm-deployment.sh test
 After the local Kubernetes ingress path is running:
 
 ```bash
-REQUESTS=30 CONCURRENCY=6 ./scripts/local-helm-deployment.sh load
+REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
 ```
 
-The `load` command also reads `.runtime.env` automatically. Override `BASE_URL`
+The load test command reads `.runtime.env` automatically. Override `BASE_URL`
 only when needed:
 
 ```bash
-BASE_URL=http://custom-host.localhost REQUESTS=30 CONCURRENCY=6 ./scripts/local-helm-deployment.sh load
+BASE_URL=http://custom-host.localhost REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
 ```
 
 ## Optional Hosted NIM Validation

@@ -179,7 +179,7 @@ Start the local Kubernetes stack:
 Submit a few requests:
 
 ```bash
-REQUESTS=30 CONCURRENCY=6 ./scripts/local-helm-deployment.sh load
+REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
 ```
 
 Open:

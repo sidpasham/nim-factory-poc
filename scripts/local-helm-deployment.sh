@@ -9,18 +9,15 @@ NAMESPACE="${NAMESPACE:-llm-gpu-benchmarking}"
 RELEASE="${RELEASE:-llm-gpu-benchmarking}"
 INGRESS_CLASS="${INGRESS_CLASS:-traefik}"
 INGRESS_HOST="${INGRESS_HOST:-llm-gpu-benchmarking.localhost}"
-DELETE_NAMESPACE="${DELETE_NAMESPACE:-false}"
 
 usage() {
   cat <<EOF
-Usage: $0 [up|down|status|test|load]
+Usage: $0 [up|down|status]
 
 Commands:
   up      Build the local image, install or upgrade the Helm release, and wait for health.
-  down    Uninstall the Helm release. Set DELETE_NAMESPACE=true to remove the namespace.
+  down    Uninstall the Helm release and delete the namespace.
   status  Show Helm release, Kubernetes workloads, and API health when reachable.
-  test    Run one end-to-end benchmark workflow and wait for completion.
-  load    Submit multiple benchmark workflows for dashboard and metrics validation.
 EOF
 }
 
@@ -33,30 +30,6 @@ load_env() {
   set -a
   source .env
   set +a
-}
-
-load_runtime_env() {
-  if [[ -z "${BASE_URL:-}" && -f ".runtime.env" ]]; then
-    set -a
-    source .runtime.env
-    set +a
-  fi
-
-  BASE_URL="${BASE_URL:-http://${INGRESS_HOST}}"
-}
-
-python_bin() {
-  if [[ -n "${PYTHON_BIN:-}" ]]; then
-    echo "${PYTHON_BIN}"
-  elif [[ -x ".venv/bin/python" ]]; then
-    echo ".venv/bin/python"
-  elif [[ -x "venv/bin/python" ]]; then
-    echo "venv/bin/python"
-  elif command -v python3 >/dev/null 2>&1; then
-    echo "python3"
-  else
-    echo "python"
-  fi
 }
 
 write_runtime_env() {
@@ -140,12 +113,7 @@ down() {
     echo "Helm release '${RELEASE}' was not found in namespace '${NAMESPACE}'."
   fi
 
-  if [[ "${DELETE_NAMESPACE}" == "true" ]]; then
-    kubectl delete namespace "${NAMESPACE}" --ignore-not-found
-  else
-    echo "Namespace '${NAMESPACE}' was left in place."
-    echo "Set DELETE_NAMESPACE=true to remove it."
-  fi
+  kubectl delete namespace "${NAMESPACE}" --ignore-not-found
 
   if [[ -f ".runtime.env" ]] && grep -q '^RUNTIME_MODE=kubernetes-helm$' .runtime.env; then
     rm .runtime.env
@@ -168,66 +136,6 @@ status() {
   echo
 }
 
-test_run() {
-  load_runtime_env
-
-  MODEL_NAME="${MODEL_NAME:-Llama-3-70B}"
-  TARGET_GPU="${TARGET_GPU:-H100-80GB}"
-  TARGET_ENVIRONMENT="${TARGET_ENVIRONMENT:-kubernetes}"
-  PRECISION_MODE="${PRECISION_MODE:-INT4}"
-  TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-120}"
-
-  echo "Using BASE_URL=${BASE_URL}"
-  echo "Health check: ${BASE_URL}/health"
-  curl -fsS "${BASE_URL}/health" | jq .
-
-  echo "Submitting benchmark workflow"
-  response="$(curl -fsS -X POST "${BASE_URL}/benchmarks" \
-    -H "Content-Type: application/json" \
-    -d "{\"model_name\":\"${MODEL_NAME}\",\"target_gpu\":\"${TARGET_GPU}\",\"target_environment\":\"${TARGET_ENVIRONMENT}\",\"precision_mode\":\"${PRECISION_MODE}\"}")"
-  echo "${response}" | jq .
-
-  workflow_id="$(echo "${response}" | jq -r '.workflow_id')"
-  deadline=$((SECONDS + TIMEOUT_SECONDS))
-
-  while (( SECONDS < deadline )); do
-    status_response="$(curl -fsS "${BASE_URL}/benchmarks/${workflow_id}")"
-    status="$(echo "${status_response}" | jq -r '.status')"
-    final_status="$(echo "${status_response}" | jq -r '.pipeline_summary.final_status // empty')"
-    echo "workflow=${workflow_id} temporal_status=${status} final_status=${final_status:-pending}"
-
-    if [[ "${status}" == "COMPLETED" ]]; then
-      echo "${status_response}" | jq .
-      if [[ "${final_status}" == "Model_Service_Ready_To_Deploy" ]]; then
-        return 0
-      fi
-      echo "Benchmark workflow completed with final_status=${final_status}" >&2
-      return 1
-    fi
-
-    sleep 2
-  done
-
-  echo "Timed out waiting for workflow ${workflow_id}" >&2
-  return 1
-}
-
-load_run() {
-  load_runtime_env
-
-  REQUESTS="${REQUESTS:-30}"
-  CONCURRENCY="${CONCURRENCY:-6}"
-  POLL="${POLL:-true}"
-  PYTHON_BIN="$(python_bin)"
-
-  echo "Using BASE_URL=${BASE_URL}"
-  "${PYTHON_BIN}" examples/load_test_validation_matrix.py \
-    --base-url "${BASE_URL}" \
-    --requests "${REQUESTS}" \
-    --concurrency "${CONCURRENCY}" \
-    --poll "${POLL}"
-}
-
 case "${COMMAND}" in
   up)
     up
@@ -237,12 +145,6 @@ case "${COMMAND}" in
     ;;
   status)
     status
-    ;;
-  test)
-    test_run
-    ;;
-  load)
-    load_run
     ;;
   -h|--help|help)
     usage
