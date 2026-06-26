@@ -17,6 +17,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .langchain/
+.runtime/
 
 # IDE/project-local metadata
 .idea/

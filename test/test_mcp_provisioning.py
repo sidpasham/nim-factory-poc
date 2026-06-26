@@ -90,16 +90,74 @@ class MCPProvisioningServerTests(unittest.TestCase):
         mock_client.validate_model.assert_called_once_with("meta/llama-test")
 
     @patch("mcp_provisioning.NIMRuntimeClient")
-    def test_validation_requires_model_name(self, mock_client_class):
-        result = MCPProvisioningServer.run_hardware_test_harness(
-            {"interconnect": "NVIDIA Hosted API"},
-            "",
-        )
+    def test_local_validation_requires_model_name(self, mock_client_class):
+        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_VALIDATION_MODE": "local"}, clear=True):
+            result = MCPProvisioningServer.run_hardware_test_harness(
+                {"interconnect": "NVIDIA Hosted API"},
+                "",
+            )
 
         self.assertFalse(result["success"])
-        self.assertEqual(result["backend"], "validation_matrix")
+        self.assertEqual(result["backend"], "local_llama_cpp")
         self.assertIn("model_name is required", result["error_message"])
         mock_client_class.from_env.assert_not_called()
+
+    @patch("mcp_provisioning.LocalLLMBenchmarkRunner")
+    def test_local_validation_is_default_backend(self, mock_runner_class):
+        topology = MCPProvisioningServer.query_hardware_topology("A10G-24GB")
+        mock_runner = mock_runner_class.from_env.return_value
+        mock_runner.benchmark_model.return_value = {
+            "success": True,
+            "backend": "local_llama_cpp",
+            "metrics": {
+                "tokens_per_second": 42,
+                "error_rate": 0.0,
+                "latency_ms": 3000,
+                "output_tokens": 128,
+            },
+            "target_topology": topology,
+        }
+
+        with patch.dict("os.environ", {}, clear=True):
+            result = MCPProvisioningServer.run_hardware_test_harness(
+                topology,
+                "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+                target_gpu="A10G-24GB",
+                precision_mode="INT4",
+                compile_result={"backend": "local_llama_cpp"},
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["backend"], "local_llama_cpp")
+        mock_runner.benchmark_model.assert_called_once()
+
+    @patch("mcp_provisioning.LocalLLMBenchmarkRunner")
+    def test_local_compile_prepares_real_model_artifact(self, mock_runner_class):
+        topology = MCPProvisioningServer.query_hardware_topology("A10G-24GB")
+        mock_runner = mock_runner_class.from_env.return_value
+        mock_runner.prepare_model.return_value = {
+            "success": True,
+            "backend": "local_llama_cpp",
+            "stage": "compile",
+            "reason": "local_model_artifact_ready",
+            "model_name": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+            "target_gpu": "A10G-24GB",
+            "required_vram_gb": 1.1,
+            "available_vram_gb": 24,
+            "vram_utilization_ratio": 0.0458,
+            "precision_mode": "INT4",
+        }
+
+        with patch.dict("os.environ", {}, clear=True):
+            result = MCPProvisioningServer.evaluate_hardware_fit(
+                topology=topology,
+                model_name="Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+                target_gpu="A10G-24GB",
+                precision_mode="INT4",
+            )
+
+        self.assertEqual(result["backend"], "local_llama_cpp")
+        mock_runner.prepare_model.assert_called_once()
 
     @patch("mcp_provisioning.NIMRuntimeClient")
     def test_validation_reports_runtime_client_error(self, mock_client_class):
@@ -118,7 +176,8 @@ class MCPProvisioningServerTests(unittest.TestCase):
     def test_validation_matrix_fails_when_model_does_not_fit_target_vram(self):
         topology = MCPProvisioningServer.query_hardware_topology("A10G-24GB")
 
-        with self.assertRaises(VRAMInsufficientError) as error:
+        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_VALIDATION_MODE": "matrix"}, clear=True), \
+                self.assertRaises(VRAMInsufficientError) as error:
             MCPProvisioningServer.evaluate_hardware_fit(
                 topology=topology,
                 model_name="Llama-3-70B",
@@ -131,33 +190,34 @@ class MCPProvisioningServerTests(unittest.TestCase):
 
     def test_validation_matrix_precision_mode_reduces_vram_and_improves_tps(self):
         topology = MCPProvisioningServer.query_hardware_topology("H100-80GB")
-        fp16_compile = MCPProvisioningServer.evaluate_hardware_fit(
-            topology=topology,
-            model_name="Llama-3-30B",
-            target_gpu="H100-80GB",
-            precision_mode="FP16",
-        )
-        int4_compile = MCPProvisioningServer.evaluate_hardware_fit(
-            topology=topology,
-            model_name="Llama-3-30B",
-            target_gpu="H100-80GB",
-            precision_mode="INT4",
-        )
+        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_VALIDATION_MODE": "matrix"}, clear=True):
+            fp16_compile = MCPProvisioningServer.evaluate_hardware_fit(
+                topology=topology,
+                model_name="Llama-3-30B",
+                target_gpu="H100-80GB",
+                precision_mode="FP16",
+            )
+            int4_compile = MCPProvisioningServer.evaluate_hardware_fit(
+                topology=topology,
+                model_name="Llama-3-30B",
+                target_gpu="H100-80GB",
+                precision_mode="INT4",
+            )
 
-        fp16_benchmark = MCPProvisioningServer.run_hardware_test_harness(
-            topology,
-            "Llama-3-30B",
-            target_gpu="H100-80GB",
-            precision_mode="FP16",
-            compile_result=fp16_compile,
-        )
-        int4_benchmark = MCPProvisioningServer.run_hardware_test_harness(
-            topology,
-            "Llama-3-30B",
-            target_gpu="H100-80GB",
-            precision_mode="INT4",
-            compile_result=int4_compile,
-        )
+            fp16_benchmark = MCPProvisioningServer.run_hardware_test_harness(
+                topology,
+                "Llama-3-30B",
+                target_gpu="H100-80GB",
+                precision_mode="FP16",
+                compile_result=fp16_compile,
+            )
+            int4_benchmark = MCPProvisioningServer.run_hardware_test_harness(
+                topology,
+                "Llama-3-30B",
+                target_gpu="H100-80GB",
+                precision_mode="INT4",
+                compile_result=int4_compile,
+            )
 
         self.assertLess(
             int4_compile["required_vram_gb"],

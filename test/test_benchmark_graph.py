@@ -101,7 +101,10 @@ class BenchmarkGraphTests(unittest.TestCase):
         self.assertIn("error_rate=0.0", result["error_message"])
 
     def test_pipeline_records_precision_profile_for_int4(self):
-        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD": "1"}, clear=True):
+        with patch.dict("os.environ", {
+            "LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD": "1",
+            "LLM_GPU_BENCHMARKING_VALIDATION_MODE": "matrix",
+        }, clear=True):
             result = llm_gpu_benchmarking_graph_pipeline.invoke({
                 "model_name": "Llama-3-30B",
                 "target_gpu": "H100-80GB",
@@ -126,7 +129,10 @@ class BenchmarkGraphTests(unittest.TestCase):
         )
 
     def test_pipeline_fails_vram_insufficient_compile(self):
-        with patch.dict("os.environ", {"LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD": "1"}, clear=True):
+        with patch.dict("os.environ", {
+            "LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD": "1",
+            "LLM_GPU_BENCHMARKING_VALIDATION_MODE": "matrix",
+        }, clear=True):
             result = llm_gpu_benchmarking_graph_pipeline.invoke({
                 "model_name": "Llama-3-70B",
                 "target_gpu": "A10G-24GB",

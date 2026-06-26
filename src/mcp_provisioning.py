@@ -4,6 +4,11 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
+from local_llm_runtime import (
+    LOCAL_LLAMA_CPP_SOURCE,
+    LocalLLMBenchmarkRunner,
+    LocalLLMRuntimeError,
+)
 from nim_runtime_client import NIMRuntimeClient
 from validation_matrix import (
     ValidationMatrixError,
@@ -18,8 +23,11 @@ HARDWARE_PROFILES_PATH = CONFIG_DIR / "hardware_profiles.json"
 DEPLOYMENT_TARGETS_PATH = CONFIG_DIR / "deployment_targets.json"
 NIM_VALIDATION_SOURCE = "nvidia_hosted_nim"
 VALIDATION_MATRIX_SOURCE = "validation_matrix"
+VALIDATION_MATRIX_MODES = {"validation", "matrix"}
+LOCAL_VALIDATION_MODE = "local"
+HOSTED_VALIDATION_MODE = "hosted"
 VALIDATION_MODE_ENV = "LLM_GPU_BENCHMARKING_VALIDATION_MODE"
-DEFAULT_VALIDATION_MODE = "validation"
+DEFAULT_VALIDATION_MODE = LOCAL_VALIDATION_MODE
 
 
 class UnsupportedProvisioningTargetError(ValueError):
@@ -105,7 +113,16 @@ class MCPProvisioningServer:
         target_gpu: str,
         precision_mode: str = "FP16",
     ) -> dict:
-        """Runs deterministic validation-matrix VRAM fit before benchmark/deploy."""
+        """Prepares the selected validation backend before benchmark/deploy."""
+        validation_mode = MCPProvisioningServer._validation_mode()
+        if validation_mode == LOCAL_VALIDATION_MODE:
+            return LocalLLMBenchmarkRunner.from_env().prepare_model(
+                model_name=model_name,
+                target_gpu=target_gpu,
+                topology=topology,
+                precision_mode=precision_mode,
+            )
+
         return matrix_evaluate_hardware_fit(
             model_name=model_name,
             target_gpu=target_gpu,
@@ -121,26 +138,58 @@ class MCPProvisioningServer:
         precision_mode: str = "FP16",
         compile_result: dict | None = None,
     ) -> dict:
-        """Runs benchmark validation in validation-matrix mode by default, hosted mode by opt-in."""
-        validation_mode = os.getenv(
-            VALIDATION_MODE_ENV,
-            DEFAULT_VALIDATION_MODE,
-        ).strip().lower()
+        """Runs benchmark validation with the configured backend."""
+        validation_mode = MCPProvisioningServer._validation_mode()
         normalized_precision = normalize_precision_mode(precision_mode)
 
-        if validation_mode == "hosted":
+        if validation_mode == LOCAL_VALIDATION_MODE:
+            if not model_name:
+                return MCPProvisioningServer._failed_local_validation(
+                    "model_name is required for local llama.cpp validation",
+                    topology,
+                )
+
+            try:
+                return LocalLLMBenchmarkRunner.from_env().benchmark_model(
+                    model_name=model_name,
+                    target_gpu=target_gpu or topology.get("accelerator", "unknown"),
+                    topology=topology,
+                    precision_mode=normalized_precision,
+                    compile_result=compile_result,
+                )
+            except LocalLLMRuntimeError as exc:
+                result = exc.to_result()
+                return {
+                    "success": False,
+                    "backend": LOCAL_LLAMA_CPP_SOURCE,
+                    "error_code": result.get("error_code"),
+                    "stage": result.get("stage"),
+                    "reason": result.get("reason"),
+                    "error_message": result.get("error_message"),
+                    "metrics": {
+                        "tokens_per_second": 0,
+                        "error_rate": 1.0,
+                        "latency_ms": 0,
+                        "output_tokens": 0,
+                    },
+                    "local_llm": result.get("local_runtime", {}),
+                    "gpu_simulation": result.get("gpu_simulation", {}),
+                    "target_topology": topology,
+                }
+
+        if validation_mode == HOSTED_VALIDATION_MODE:
             return MCPProvisioningServer._run_nvidia_hosted_nim_validation(
                 model_name,
                 topology,
             )
 
-        if validation_mode != "validation":
+        if validation_mode not in VALIDATION_MATRIX_MODES:
             return {
                 "success": False,
-                "backend": VALIDATION_MATRIX_SOURCE,
+                "backend": "unsupported",
                 "error_message": (
                     f"unsupported {VALIDATION_MODE_ENV} '{validation_mode}'. "
-                    "Supported values: validation, hosted"
+                    "Supported values: local, hosted, matrix"
                 ),
                 "metrics": {
                     "tokens_per_second": 0,
@@ -234,3 +283,25 @@ class MCPProvisioningServer:
                 },
                 "target_topology": topology,
             }
+
+    @staticmethod
+    def _validation_mode() -> str:
+        return os.getenv(
+            VALIDATION_MODE_ENV,
+            DEFAULT_VALIDATION_MODE,
+        ).strip().lower()
+
+    @staticmethod
+    def _failed_local_validation(error_message: str, topology: dict) -> dict:
+        return {
+            "success": False,
+            "backend": LOCAL_LLAMA_CPP_SOURCE,
+            "error_message": error_message,
+            "metrics": {
+                "tokens_per_second": 0,
+                "error_rate": 1.0,
+                "latency_ms": 0,
+                "output_tokens": 0,
+            },
+            "target_topology": topology,
+        }

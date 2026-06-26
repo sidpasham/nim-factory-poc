@@ -24,7 +24,21 @@ config:
   minimumTpsThreshold: "100"
   nimBaseUrl: "https://integrate.api.nvidia.com/v1"
   nimTimeoutSeconds: "30"
-  validationMode: "validation"
+  validationMode: "local"
+  localLlmRoot: ".runtime/local-llm"
+  localLlmProfilesPath: "src/config/local_llm_profiles.json"
+  llamaCppRepoUrl: "https://github.com/ggml-org/llama.cpp.git"
+  llamaCppGitRef: "master"
+  llamaCppCmakeArgs: "-DGGML_METAL=OFF -DBUILD_SHARED_LIBS=OFF"
+  llamaCppBuildJobs: "4"
+  llamaCppThreads: "4"
+  llamaCppBenchRepetitions: "1"
+  localLlmDownloadTimeoutSeconds: "1800"
+  localLlmBenchmarkTimeoutSeconds: "900"
+  localLlmWarmupOnStartup: "true"
+  localLlmWarmupModels: "all"
+  localLlmWarmupPrecisionModes: "INT4"
+  localLlmWarmupRequired: "true"
   temporalAddress: ""
   logLevel: "INFO"
 
@@ -38,6 +52,56 @@ worker:
   replicaCount: 1
   metricsPort: 9000
   maxConcurrentActivities: "10"
+  service:
+    type: ClusterIP
+    port: 9000
+
+monitoring:
+  enabled: false
+  prometheus:
+    image: prom/prometheus:latest
+    imagePullPolicy: IfNotPresent
+    retention: 24h
+    scrapeInterval: 5s
+    service:
+      type: ClusterIP
+      port: 9090
+    ingress:
+      enabled: false
+      className: ""
+      annotations: {}
+      host: prometheus.llm-gpu-benchmarking.localhost
+      path: /
+      pathType: Prefix
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  grafana:
+    image: grafana/grafana:latest
+    imagePullPolicy: IfNotPresent
+    adminUser: admin
+    adminPassword: admin
+    service:
+      type: ClusterIP
+      port: 3000
+    ingress:
+      enabled: false
+      className: ""
+      annotations: {}
+      host: grafana.llm-gpu-benchmarking.localhost
+      path: /
+      pathType: Prefix
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
 
 secret:
   create: false
@@ -56,11 +120,11 @@ workerPodAnnotations:
 
 resources:
   requests:
-    cpu: 100m
-    memory: 128Mi
-  limits:
     cpu: 500m
-    memory: 512Mi
+    memory: 1Gi
+  limits:
+    cpu: "4"
+    memory: 8Gi
 
 podSecurityContext:
   runAsNonRoot: true

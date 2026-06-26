@@ -1,0 +1,61 @@
+{{- if and .Values.monitoring.enabled (or .Values.monitoring.grafana.ingress.enabled .Values.monitoring.prometheus.ingress.enabled) }}
+{{- if .Values.monitoring.grafana.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "llm-gpu-benchmarking.fullname" . }}-grafana
+  labels:
+    {{- include "llm-gpu-benchmarking.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+  {{- with .Values.monitoring.grafana.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.monitoring.grafana.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.monitoring.grafana.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.monitoring.grafana.ingress.path }}
+            pathType: {{ .Values.monitoring.grafana.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "llm-gpu-benchmarking.fullname" . }}-grafana
+                port:
+                  number: {{ .Values.monitoring.grafana.service.port }}
+{{- end }}
+{{- if and .Values.monitoring.grafana.ingress.enabled .Values.monitoring.prometheus.ingress.enabled }}
+---
+{{- end }}
+{{- if .Values.monitoring.prometheus.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "llm-gpu-benchmarking.fullname" . }}-prometheus
+  labels:
+    {{- include "llm-gpu-benchmarking.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+  {{- with .Values.monitoring.prometheus.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.monitoring.prometheus.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.monitoring.prometheus.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.monitoring.prometheus.ingress.path }}
+            pathType: {{ .Values.monitoring.prometheus.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "llm-gpu-benchmarking.fullname" . }}-prometheus
+                port:
+                  number: {{ .Values.monitoring.prometheus.service.port }}
+{{- end }}
+{{- end }}

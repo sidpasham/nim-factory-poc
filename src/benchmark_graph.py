@@ -121,7 +121,7 @@ def record_precision_profile(state: BenchmarkState) -> Dict[str, Any]:
     )
 
 
-def compile_validation_matrix_plan(state: BenchmarkState) -> Dict[str, Any]:
+def compile_validation_plan(state: BenchmarkState) -> Dict[str, Any]:
     start_time = time.perf_counter()
     mode = normalize_precision_mode(state.get("precision_mode", "FP16"))
 
@@ -133,7 +133,8 @@ def compile_validation_matrix_plan(state: BenchmarkState) -> Dict[str, Any]:
             precision_mode=mode,
         )
         LOGGER.info(
-            "validation matrix compile fit succeeded model=%s hardware=%s precision_mode=%s required_vram=%sGB capacity=%sGB",
+            "validation compile fit succeeded backend=%s model=%s hardware=%s precision_mode=%s required_vram=%sGB capacity=%sGB",
+            compile_result.get("backend", "unknown"),
             state["model_name"],
             state["target_gpu"],
             mode,
@@ -153,7 +154,8 @@ def compile_validation_matrix_plan(state: BenchmarkState) -> Dict[str, Any]:
     except ValidationMatrixError as exc:
         compile_result = exc.to_result()
         LOGGER.warning(
-            "validation matrix compile failed model=%s hardware=%s precision_mode=%s error=%s",
+            "validation compile failed backend=%s model=%s hardware=%s precision_mode=%s error=%s",
+            compile_result.get("backend", "unknown"),
             state["model_name"],
             state["target_gpu"],
             mode,
@@ -168,7 +170,7 @@ def compile_validation_matrix_plan(state: BenchmarkState) -> Dict[str, Any]:
                 "compile_result": compile_result,
                 "validation_results": {
                     "success": False,
-                    "backend": "validation_matrix",
+                    "backend": compile_result.get("backend", "validation_matrix"),
                     "error_code": compile_result.get("error_code"),
                     "stage": compile_result.get("stage", "compile"),
                     "reason": compile_result.get("reason", "validation"),
@@ -179,7 +181,9 @@ def compile_validation_matrix_plan(state: BenchmarkState) -> Dict[str, Any]:
                         "latency_ms": 0,
                         "output_tokens": 0,
                     },
-                    "validation_matrix": compile_result,
+                    "validation_details": compile_result,
+                    "local_llm": compile_result.get("local_runtime", {}),
+                    "gpu_simulation": compile_result.get("gpu_simulation", {}),
                     "target_topology": state["hardware_topology"],
                 },
                 "status": "Compilation_Failed",
@@ -296,7 +300,7 @@ def route_validation_results(state: BenchmarkState) -> str:
 workflow = StateGraph(BenchmarkState)
 workflow.add_node("discover_infrastructure", discover_infrastructure)
 workflow.add_node("record_precision_profile", record_precision_profile)
-workflow.add_node("compile_validation_matrix_plan", compile_validation_matrix_plan)
+workflow.add_node("compile_validation_plan", compile_validation_plan)
 workflow.add_node("run_validation_harness", run_validation_harness)
 workflow.add_node("handle_failure", handle_failure)
 workflow.add_node("compile_and_publish_model_service", compile_and_publish_model_service)
@@ -307,12 +311,12 @@ workflow.add_conditional_edges(
     route_precision_profile,
     {
         "profile": "record_precision_profile",
-        "skip": "compile_validation_matrix_plan",
+        "skip": "compile_validation_plan",
     },
 )
-workflow.add_edge("record_precision_profile", "compile_validation_matrix_plan")
+workflow.add_edge("record_precision_profile", "compile_validation_plan")
 workflow.add_conditional_edges(
-    "compile_validation_matrix_plan",
+    "compile_validation_plan",
     route_compile_results,
     {
         "benchmark": "run_validation_harness",

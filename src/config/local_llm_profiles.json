@@ -1,0 +1,34 @@
+{
+  "profiles": [
+    {
+      "model_name": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+      "aliases": [
+        "qwen2.5-0.5b-instruct",
+        "qwen2.5-0.5b",
+        "local-mac-m3-qwen2.5-0.5b"
+      ],
+      "hf_repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+      "architecture": "qwen2",
+      "license": "Apache-2.0",
+      "parameter_count_billion": 0.5,
+      "context_size": 2048,
+      "max_tokens": 128,
+      "temperature": 0.0,
+      "benchmark_prompt": "Briefly describe why local CPU-only inference validation matters before deploying a large language model to GPU hardware.",
+      "artifacts": {
+        "FP16": {
+          "filename": "qwen2.5-0.5b-instruct-fp16.gguf",
+          "quantization": "FP16"
+        },
+        "INT8": {
+          "filename": "qwen2.5-0.5b-instruct-q8_0.gguf",
+          "quantization": "Q8_0"
+        },
+        "INT4": {
+          "filename": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+          "quantization": "Q4_K_M"
+        }
+      }
+    }
+  ]
+}

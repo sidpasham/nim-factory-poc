@@ -12,7 +12,11 @@ Service Health:
 Benchmark Ingest API:
   curl -sS -X POST http://{{ (first .Values.ingress.hosts).host }}/benchmarks \
     -H "Content-Type: application/json" \
-    -d '{"model_name":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","target_gpu":"NVIDIA GB200","target_environment":"kubernetes"}' | jq .
+    -d '{"model_name":"Qwen/Qwen2.5-0.5B-Instruct-GGUF","target_gpu":"A10G-24GB","target_environment":"kubernetes","precision_mode":"INT4"}' | jq .
+
+Local validation warmup runs in the worker before it accepts Temporal work. With
+default values, that builds llama.cpp and downloads the configured INT4 GGUF
+artifact during worker startup.
 {{- else }}
 Ingress is disabled. Re-run the same Helm install or upgrade command with:
   --set ingress.enabled=true

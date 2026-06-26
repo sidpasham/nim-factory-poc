@@ -70,20 +70,20 @@ paths:
             schema:
               $ref: "#/components/schemas/ModelIngestRequest"
             examples:
-              int4_h100_success:
-                summary: Llama 70B INT4 on H100
+              int4_a10g_success:
+                summary: Local Qwen INT4 on A10G
                 value:
-                  model_name: Llama-3-70B
-                  target_gpu: H100-80GB
+                  model_name: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+                  target_gpu: A10G-24GB
                   target_environment: kubernetes
                   precision_mode: INT4
-              fp16_a10g_failure:
-                summary: Llama 70B FP16 on A10G
+              unconfigured_model_failure:
+                summary: Unconfigured model fails in local mode
                 value:
                   model_name: Llama-3-70B
                   target_gpu: A10G-24GB
                   target_environment: kubernetes
-                  precision_mode: FP16
+                  precision_mode: INT4
       responses:
         "200":
           description: Workflow accepted and started.
@@ -95,8 +95,8 @@ paths:
                 accepted:
                   value:
                     message: Benchmark run initiated.
-                    workflow_id: llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
-                    status_url: /benchmarks/llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
+                    workflow_id: llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4
+                    status_url: /benchmarks/llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4
                     precision_mode: INT4
         "500":
           description: Workflow could not be started.
@@ -132,7 +132,7 @@ paths:
           description: Temporal workflow identifier returned by `/benchmarks`.
           schema:
             type: string
-          example: llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
+          example: llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4
       responses:
         "200":
           description: Workflow state and optional final pipeline summary.
@@ -143,15 +143,15 @@ paths:
               examples:
                 running:
                   value:
-                    workflow_id: llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
+                    workflow_id: llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4
                     status: RUNNING
                 completed_success:
                   value:
-                    workflow_id: llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
+                    workflow_id: llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4
                     status: COMPLETED
                     pipeline_summary:
-                      model: Llama-3-70B
-                      hardware: H100-80GB
+                      model: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+                      hardware: A10G-24GB
                       environment: kubernetes
                       precision_mode: INT4
                       final_status: Model_Service_Ready_To_Deploy
@@ -159,16 +159,16 @@ paths:
                       error_log: ""
                 completed_failure:
                   value:
-                    workflow_id: llm-gpu-benchmarking-llama-3-70b-fp16-a1b2c3d4
+                    workflow_id: llm-gpu-benchmarking-llama-3-70b-int4-a1b2c3d4
                     status: COMPLETED
                     pipeline_summary:
                       model: Llama-3-70B
                       hardware: A10G-24GB
                       environment: kubernetes
-                      precision_mode: FP16
+                      precision_mode: INT4
                       final_status: Failed
                       deployable: false
-                      error_log: "VRAM_INSUFFICIENT_EXCEPTION: model Llama-3-70B requires 158.80GB VRAM with FP16, but A10G-24GB exposes 24.00GB."
+                      error_log: "local model 'Llama-3-70B' is not configured."
         "404":
           description: Workflow was not found or could not be queried.
           content:
@@ -191,10 +191,10 @@ components:
         - INT4
       default: FP16
       description: |
-        Model precision mode used by the validation matrix. Lower precision
-        reduces the estimated VRAM footprint and changes simulated benchmark
-        results. Accepted aliases include `HALF` for `FP16`, `8BIT` for `INT8`,
-        and `4BIT`, `AWQ`, or `INT4-AWQ` for `INT4`.
+        Model precision mode. In default local mode this selects the configured
+        GGUF artifact for the local model profile. Accepted aliases include
+        `HALF` for `FP16`, `8BIT` for `INT8`, and `4BIT`, `AWQ`, or
+        `INT4-AWQ` for `INT4`.
     ModelIngestRequest:
       type: object
       required:
@@ -204,10 +204,10 @@ components:
         model_name:
           type: string
           minLength: 1
-          description: Model identifier or model label containing a size token such as `70B`.
+          description: Model identifier or alias configured in `src/config/local_llm_profiles.json` for local mode.
           examples:
-            - Llama-3-70B
-            - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+            - Qwen/Qwen2.5-0.5B-Instruct-GGUF
+            - qwen2.5-0.5b-instruct
         target_gpu:
           type: string
           minLength: 1
@@ -336,6 +336,11 @@ components:
       properties:
         success:
           type: boolean
+        backend:
+          type: string
+          examples:
+            - local_llama_cpp
+            - validation_matrix
         stage:
           type: string
           example: compile
@@ -369,6 +374,12 @@ components:
           $ref: "#/components/schemas/PrecisionMode"
         architecture:
           type: string
+        local_runtime:
+          type: object
+          additionalProperties: true
+        gpu_simulation:
+          type: object
+          additionalProperties: true
     ValidationMetrics:
       type: object
       properties:
@@ -383,6 +394,15 @@ components:
           format: double
         output_tokens:
           type: integer
+        prompt_eval_tokens_per_second:
+          type: number
+          format: double
+        model_file_size_gb:
+          type: number
+          format: double
+        sample_latency_ms:
+          type: number
+          format: double
         accuracy_score:
           type: number
           format: double

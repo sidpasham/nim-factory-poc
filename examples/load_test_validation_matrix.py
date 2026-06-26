@@ -8,31 +8,31 @@ import httpx
 
 PAYLOADS: List[Dict[str, Any]] = [
     {
-        "model_name": "Llama-3-8B",
+        "model_name": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
         "target_gpu": "A10G-24GB",
-        "target_environment": "kubernetes",
-        "precision_mode": "FP16",
-    },
-    {
-        "model_name": "Llama-3-70B",
-        "target_gpu": "A10G-24GB",
-        "target_environment": "kubernetes",
-        "precision_mode": "FP16",
-    },
-    {
-        "model_name": "Llama-3-70B",
-        "target_gpu": "H100-80GB",
         "target_environment": "kubernetes",
         "precision_mode": "INT4",
     },
     {
-        "model_name": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-        "target_gpu": "NVIDIA GB200",
-        "target_environment": "cloud",
+        "model_name": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+        "target_gpu": "H100-80GB",
+        "target_environment": "kubernetes",
         "precision_mode": "INT8",
     },
     {
-        "model_name": "meta/llama-3.1-8b-instruct",
+        "model_name": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+        "target_gpu": "NVIDIA GB200",
+        "target_environment": "cloud",
+        "precision_mode": "FP16",
+    },
+    {
+        "model_name": "qwen2.5-0.5b-instruct",
+        "target_gpu": "AMD MI355X",
+        "target_environment": "on-prem",
+        "precision_mode": "INT8",
+    },
+    {
+        "model_name": "local-mac-m3-qwen2.5-0.5b",
         "target_gpu": "NVIDIA T4-16GB",
         "target_environment": "on-prem",
         "precision_mode": "INT4",
@@ -75,12 +75,12 @@ async def wait_for_completion(
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Submit validation-matrix load to LLM GPU Benchmarking.")
+    parser = argparse.ArgumentParser(description="Submit local LLM benchmark load to LLM GPU Benchmarking.")
     parser.add_argument("--base-url", default="http://llm-gpu-benchmarking.localhost")
-    parser.add_argument("--requests", type=int, default=25)
-    parser.add_argument("--concurrency", type=int, default=5)
+    parser.add_argument("--requests", type=int, default=5)
+    parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--poll", type=parse_bool, default=True)
-    parser.add_argument("--timeout-seconds", type=float, default=120.0)
+    parser.add_argument("--timeout-seconds", type=float, default=1800.0)
     args = parser.parse_args()
 
     semaphore = asyncio.Semaphore(args.concurrency)

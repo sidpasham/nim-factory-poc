@@ -4,13 +4,15 @@ A proof of concept for a distributed LLM GPU benchmark control plane.
 
 The project accepts a model request, selects a target hardware and deployment
 profile, starts a Temporal workflow, executes a LangGraph pipeline in a worker,
-validates hardware fit with a deterministic validation matrix, and exposes
-Prometheus metrics for dashboarding.
+prepares a real local GGUF model with llama.cpp, runs CPU-only inference, and
+exposes Prometheus metrics for dashboarding.
 
 This repository treats a local laptop as the production-like environment for the
 POC. The control-plane boundaries, deployment paths, validation decisions,
 observability, and operational scripts are structured like a real service, while
-GPU provisioning and model-service artifact publishing remain simulated.
+target GPU provisioning and model-service artifact publishing remain simulated.
+The default benchmark path is real local model execution; only target-GPU
+capacity and topology are simulated when no physical GPU is available.
 
 ## Design Status
 
@@ -19,7 +21,8 @@ GPU provisioning and model-service artifact publishing remain simulated.
 | API control plane | FastAPI service in `src/main.py` |
 | Distributed execution | Temporal workflow plus separate worker process |
 | Pipeline orchestration | LangGraph state machine inside the worker activity |
-| Hardware validation | Deterministic validation matrix by default |
+| Local runtime validation | Default llama.cpp source build plus Qwen GGUF artifact download |
+| Hardware validation | Artifact-backed target GPU memory simulation |
 | Hosted runtime validation | Optional NVIDIA-hosted OpenAI-compatible validation mode |
 | Observability | Prometheus metrics and a provisioned Grafana dashboard JSON |
 | Local deployment | Helm chart with ingress for Rancher Desktop or another local cluster |
@@ -31,9 +34,11 @@ An LLM GPU benchmarking service needs to answer an operational question before s
 time: can this model run on this target hardware, with this precision mode, in
 this deployment environment?
 
-This implementation makes validation data-driven and deterministic. A request for a large model on
-small hardware can fail for the right reason, expose that failure through the API
-result, increment Prometheus counters, and show up in Grafana.
+This implementation makes validation data-driven and executable. A request for a
+configured local model downloads the real GGUF artifact, builds llama.cpp from
+source when needed, runs local CPU inference, exposes measured throughput and
+latency, and still fails target-GPU fit for the right reason before claiming a
+deployment is viable.
 
 ## Goals
 
@@ -44,8 +49,8 @@ result, increment Prometheus counters, and show up in Grafana.
 - Use Temporal for durable workflow orchestration and a separate worker process
   for benchmark execution.
 - Use LangGraph to keep pipeline stages explicit and testable.
-- Replace hardcoded success responses with a validation matrix that reacts to
-  model size, target VRAM, and precision mode.
+- Replace hardcoded success responses with a real local LLM execution backend
+  that reacts to model artifact size, target VRAM, and precision mode.
 - Emit metrics that explain throughput, bottlenecks, failure reasons, worker
   activity, VRAM usage, and precision-mode impact.
 - Keep the project runnable locally through one Kubernetes Helm lifecycle script.
@@ -54,7 +59,8 @@ result, increment Prometheus counters, and show up in Grafana.
 
 - This POC does not provision real GPU nodes.
 - This POC does not build or publish a real model-service artifact.
-- The default validation path does not execute inference on physical hardware.
+- The default validation path does not execute inference on a physical target
+  GPU; llama.cpp is forced to CPU execution with `--n-gpu-layers 0`.
 - The local Temporal server uses Temporal's development mode, not a production
   persistence backend.
 - Authentication, authorization, audit logging, artifact storage, and CI/CD
@@ -87,8 +93,8 @@ flowchart TB
 flowchart TB
     request[Request]
     profiles[Resolve profiles]
-    fit[Check VRAM fit]
-    bench[Simulate benchmark]
+    fit[Build runtime, download model, simulate target VRAM fit]
+    bench[Run local llama.cpp inference]
     decision{Deployable?}
     ready[Ready to deploy]
     failed[Failed]
@@ -122,7 +128,9 @@ flowchart TB
 | Worker | `src/worker.py` | Connects to Temporal, starts worker metrics, and executes queued activities. |
 | Activity | `src/activities.py` | Runs the benchmark pipeline and records Prometheus metrics. |
 | Benchmark graph | `src/benchmark_graph.py` | Defines the LangGraph stages and success/failure routing. |
-| Validation matrix | `src/validation_matrix.py` | Estimates VRAM fit and deterministic benchmark output. |
+| Local LLM runtime | `src/local_llm_runtime.py` | Builds llama.cpp, downloads GGUF artifacts, runs CPU-only inference, and parses metrics. |
+| Local model profiles | `src/config/local_llm_profiles.json` | Maps API model names to Hugging Face GGUF artifacts by precision mode. |
+| Validation matrix | `src/validation_matrix.py` | Explicit opt-in deterministic backend for tests and legacy demos. |
 | Provisioning facade | `src/mcp_provisioning.py` | Loads hardware/deployment profiles and chooses validation backend. |
 | Hosted runtime client | `src/nim_runtime_client.py` | Optional OpenAI-compatible NVIDIA hosted validation client. |
 | Metrics | `src/metrics.py` | Owns Prometheus counters, gauges, and histograms. |
@@ -132,9 +140,9 @@ flowchart TB
 | Path | Purpose |
 | --- | --- |
 | `src/` | Runtime Python modules for API, Temporal worker, graph, validation, and metrics. |
-| `src/config/` | Hardware, deployment, and hosted-model profile JSON. |
+| `src/config/` | Hardware, deployment, hosted-model, and local GGUF model profile JSON. |
 | `test/` | Unit tests for schemas, graph routing, provisioning, and hosted validation. |
-| `examples/` | Curl examples and validation-matrix load generator. |
+| `examples/` | Curl examples and local benchmark load generator. |
 | `docs/` | Local production runbook, non-technical overview, and operator-facing documentation. |
 | `scripts/` | Kubernetes lifecycle, test, load, and validation scripts. |
 | `Dockerfile` | Application image definition used by API and worker containers. |
@@ -164,11 +172,11 @@ sequenceDiagram
     T->>W: Schedule activity
     W->>G: Execute benchmark pipeline
     G->>G: Discover profiles
-    G->>G: Check precision and VRAM fit
+    G->>G: Build llama.cpp, download GGUF, simulate target VRAM fit
     alt VRAM insufficient
         G-->>W: Failed with VRAM_INSUFFICIENT_EXCEPTION
     else Fit succeeds
-        G->>G: Run deterministic benchmark
+        G->>G: Run local CPU-only llama.cpp benchmark
         G-->>W: Deployable or failed by TPS threshold
     end
     W-->>T: Final pipeline summary
@@ -185,10 +193,13 @@ sequenceDiagram
 6. The worker invokes the LangGraph pipeline.
 7. The graph discovers hardware and deployment metadata from JSON config.
 8. The graph records a quantized precision profile for `INT8` or `INT4`.
-9. The graph compiles a validation-matrix plan and checks VRAM fit.
+9. The graph prepares the selected backend. In default local mode it builds
+   llama.cpp when needed, downloads the configured GGUF artifact, and simulates
+   target GPU VRAM fit from the real artifact size.
 10. If VRAM is insufficient, the run fails with `VRAM_INSUFFICIENT_EXCEPTION`.
-11. If the model fits, the benchmark harness emits deterministic throughput,
-    latency, VRAM, and accuracy metrics.
+11. If the target GPU fit succeeds, the benchmark harness runs local CPU-only
+    llama.cpp inference and emits measured throughput, latency, token, model
+    artifact, and simulated target-VRAM metrics.
 12. The graph routes the run to publish or failure based on validation success
     and the configured TPS threshold.
 13. The activity records metrics and returns the final pipeline summary.
@@ -217,10 +228,10 @@ Content-Type: application/json
 
 ```json
 {
-  "model_name": "Llama-3-70B",
+  "model_name": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
   "target_gpu": "A10G-24GB",
   "target_environment": "kubernetes",
-  "precision_mode": "FP16"
+  "precision_mode": "INT4"
 }
 ```
 
@@ -228,7 +239,7 @@ Fields:
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `model_name` | Yes | Exact configured model name or a name with a size token such as `70B`. |
+| `model_name` | Yes | Exact configured local model profile name or alias from `src/config/local_llm_profiles.json`. |
 | `target_gpu` | Yes | Matched against `src/config/hardware_profiles.json`. |
 | `target_environment` | No | Defaults to `kubernetes`; matched against deployment targets. |
 | `precision_mode` | No | Defaults to `FP16`; supported values are `FP16`, `INT8`, and `INT4`. |
@@ -238,9 +249,9 @@ Example response:
 ```json
 {
   "message": "Benchmark run initiated.",
-  "workflow_id": "llm-gpu-benchmarking-llama-3-70b-fp16-a1b2c3d4",
-  "status_url": "/benchmarks/llm-gpu-benchmarking-llama-3-70b-fp16-a1b2c3d4",
-  "precision_mode": "FP16"
+  "workflow_id": "llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4",
+  "status_url": "/benchmarks/llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4",
+  "precision_mode": "INT4"
 }
 ```
 
@@ -254,7 +265,7 @@ While running:
 
 ```json
 {
-  "workflow_id": "llm-gpu-benchmarking-llama-3-70b-fp16-a1b2c3d4",
+  "workflow_id": "llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4",
   "status": "RUNNING"
 }
 ```
@@ -263,278 +274,214 @@ After completion:
 
 ```json
 {
-  "workflow_id": "llm-gpu-benchmarking-llama-3-70b-fp16-a1b2c3d4",
+  "workflow_id": "llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4",
   "status": "COMPLETED",
   "pipeline_summary": {
-    "model": "Llama-3-70B",
+    "model": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
     "hardware": "A10G-24GB",
     "environment": "kubernetes",
-    "precision_mode": "FP16",
-    "final_status": "Failed",
-    "deployable": false,
-    "error_log": "VRAM_INSUFFICIENT_EXCEPTION: model Llama-3-70B requires 158.80GB VRAM with FP16, but A10G-24GB exposes 24.00GB. for model Llama-3-70B on A10G-24GB in kubernetes (PCIe; error_rate=1.0)."
+    "precision_mode": "INT4",
+    "final_status": "Model_Service_Ready_To_Deploy",
+    "deployable": true,
+    "error_log": ""
   }
 }
 ```
 
-## Validation Matrix Design
+## Local LLM Validation Design
 
-The default runtime mode is deterministic local validation:
+The default runtime mode is real local validation:
 
 ```bash
-LLM_GPU_BENCHMARKING_VALIDATION_MODE=validation
+LLM_GPU_BENCHMARKING_VALIDATION_MODE=local
 ```
 
-The validation matrix answers two questions:
+Local mode answers two questions:
 
-- Compile fit: does the model weight footprint fit into the target VRAM?
-- Benchmark expectation: if it fits, what throughput, latency, VRAM use, and
-  accuracy should this target produce for the selected precision mode?
+- Can the configured GGUF artifact be prepared on this host by building
+  llama.cpp and downloading the real model file?
+- Given that artifact size, does the simulated target GPU have enough VRAM, and
+  what measured throughput/latency does CPU-only local inference produce?
 
 ```mermaid
 flowchart TD
-    request[Model ingest request] --> profiles[Resolve hardware and deployment profiles]
+    request[Model ingest request] --> profiles[Resolve hardware, deployment, and local model profile]
     profiles --> known{Profiles known?}
     known -->|No| configError[Fail with configuration error]
     known -->|Yes| precision[Normalize precision mode]
-    precision --> estimate[Estimate required VRAM]
-    estimate --> fit{Required VRAM <= available VRAM?}
+    precision --> runtime[Build llama.cpp and download GGUF artifact]
+    runtime --> fit{Artifact-backed required VRAM <= target VRAM?}
     fit -->|No| oom[Fail: VRAM_INSUFFICIENT_EXCEPTION]
-    fit -->|Yes| benchmark[Run deterministic benchmark simulation]
+    fit -->|Yes| benchmark[Run llama.cpp with --n-gpu-layers 0]
     benchmark --> success{Benchmark success?}
     success -->|No| benchmarkFail[Fail: benchmark]
-    success -->|Yes| threshold{TPS > threshold?}
+    success -->|Yes| threshold{Measured TPS > threshold?}
     threshold -->|No| lowTps[Fail: low throughput]
     threshold -->|Yes| deployable[Ready to deploy]
 ```
 
 ### Core Business Logic
 
-The business decision is not "did the workflow run?" It is "is this model
-deployable on this hardware, in this environment, with this precision mode?"
+The business decision is not "did the workflow run?" It is "is this configured
+model deployable on this target hardware, in this environment, with this
+precision mode?"
 
 The pipeline makes that decision in this order:
 
 1. Ingest accepts `model_name`, `target_gpu`, `target_environment`, and
    `precision_mode`, then creates a Temporal workflow with status `Ingested`.
-2. Discovery resolves the requested hardware and environment to configured
-   profiles. Unknown hardware or deployment labels fail instead of falling back
-   to a generic target.
+2. Discovery resolves hardware and environment profiles. Unknown labels fail
+   instead of falling back to a generic target.
 3. Precision handling normalizes aliases such as `4BIT` or `AWQ` to `INT4`.
-   `FP16` skips the precision-profile stage because it is the baseline mode.
-   `INT8` and `INT4` record precision metadata before compile.
-4. Compile fit estimates required VRAM and compares it with target capacity.
-   If the model does not fit, the run fails immediately with
-   `VRAM_INSUFFICIENT_EXCEPTION`.
-5. Benchmark simulation runs only after compile fit succeeds. It estimates TPS,
-   latency, VRAM utilization, and accuracy from the model size, hardware profile,
-   and precision profile.
-6. Publish routing requires both `success=true` and
-   `tokens_per_second > LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD`. The default threshold is
-   `100` TPS.
-7. Failure handling chooses the most specific reason available: compile error,
-   benchmark error, unsuccessful benchmark, or low throughput.
-8. The worker records counters, histograms, gauges, stage durations, and the
+4. Local compile prepares the runtime: clone/build llama.cpp when needed,
+   download the configured Hugging Face GGUF artifact, validate optional size or
+   checksum metadata, and record host/runtime details.
+5. Target GPU fit is simulated because no physical GPU is available. The
+   simulation uses the downloaded artifact size plus runtime overhead and
+   compares that value with the configured target topology.
+6. Benchmark runs the real model locally through `llama-cli` with
+   `--n-gpu-layers 0`, parses llama.cpp performance output, and reports measured
+   generation TPS, latency, output tokens, prompt-eval TPS, and model file size.
+7. Publish routing requires both `success=true` and
+   `tokens_per_second > LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD`. The default
+   threshold is `100` TPS.
+8. Failure handling chooses the most specific reason available: model profile
+   error, runtime build/download error, target VRAM OOM, benchmark error, or low
+   throughput.
+9. The worker records counters, histograms, gauges, stage durations, and the
    final summary returned by `GET /benchmarks/{workflow_id}`.
 
 Decision table:
 
 | Condition | Outcome |
 | --- | --- |
-| Hardware or environment profile is unknown | Request/workflow fails with a configuration error. |
-| Required VRAM is greater than available VRAM | `Failed`, reason `oom`, stage `compile`. |
-| Compile fits but benchmark reports `success=false` | `Failed`, stage `benchmark`. |
-| Benchmark succeeds but TPS is at or below the threshold | `Failed`, low-throughput reason. |
-| Benchmark succeeds and TPS is above the threshold | `Model_Service_Ready_To_Deploy`. |
+| Hardware, environment, or local model profile is unknown | Request/workflow fails with a configuration error. |
+| llama.cpp cannot be cloned, built, or found | `Failed`, stage `compile`. |
+| GGUF artifact cannot be downloaded or verified | `Failed`, stage `compile`. |
+| Simulated target VRAM is lower than artifact-backed requirement | `Failed`, reason `oom`, stage `compile`. |
+| Local llama.cpp benchmark exits nonzero or lacks perf metrics | `Failed`, stage `benchmark`. |
+| Benchmark succeeds but measured TPS is at or below the threshold | `Failed`, low-throughput reason. |
+| Benchmark succeeds and measured TPS is above the threshold | `Model_Service_Ready_To_Deploy`. |
 
-### Model Size
+### Local Model Profiles
 
-Model size is resolved in this order:
-
-1. Exact overrides in `src/validation_matrix.py` for configured demo models.
-2. A size token parsed from the model name, such as `8B`, `30B`, or `70B`.
-3. A default parameter count for unknown model names.
-
-### Precision Modes
-
-| Precision mode | Bytes per parameter | Throughput effect | Latency effect | Accuracy score |
-| --- | ---: | ---: | ---: | ---: |
-| `FP16` | 2.0 | Baseline | Baseline | 0.995 |
-| `INT8` | 1.0 | Higher | Lower | 0.975 |
-| `INT4` | 0.5 | Highest | Lowest | 0.935 |
-
-The API field is named `precision_mode` and the Python enum is `PrecisionMode`.
-
-### VRAM Formula
-
-The matrix estimates required VRAM as:
+Local models are configured in:
 
 ```text
-required_vram_gb =
-  (parameter_count_billion * bytes_per_parameter * 1.12) + 2.0
+src/config/local_llm_profiles.json
 ```
 
-The `1.12` multiplier represents runtime overhead around the model weights. The
-additional `2.0GB` represents baseline runtime memory.
+The default profile is `Qwen/Qwen2.5-0.5B-Instruct-GGUF`, with FP16, INT8, and
+INT4 GGUF artifacts. Larger models use the same path: add a profile with the
+Hugging Face repo, precision-specific GGUF filenames, context size, prompt, and
+parameter count. Requests for unconfigured model names fail explicitly; the
+service does not silently substitute a smaller model.
 
-Example:
+### Runtime Artifacts
+
+By default, generated runtime files live under:
 
 ```text
-Llama-3-70B at FP16:
-  (70 * 2.0 * 1.12) + 2.0 = 158.8GB
-
-A10G-24GB capacity:
-  24GB
-
-Result:
-  VRAM_INSUFFICIENT_EXCEPTION
+.runtime/local-llm/
 ```
 
-The same model with `INT4` has a much smaller estimated footprint:
+That directory contains the llama.cpp source checkout/build and downloaded model
+artifacts. It is intentionally ignored by git. For container or cluster runs,
+set `LLM_GPU_BENCHMARKING_LOCAL_LLM_ROOT` to a writable persistent volume if you
+do not want to rebuild or redownload across pod restarts.
 
-```text
-Llama-3-70B at INT4:
-  (70 * 0.5 * 1.12) + 2.0 = 41.2GB
+### Cache And Warmup
+
+Local mode has three cache layers:
+
+| Layer | Cache path | Reused when |
+| --- | --- | --- |
+| llama.cpp source/build | `.runtime/local-llm/llama.cpp` | `LLAMA_CPP_REPO_URL`, `LLAMA_CPP_GIT_REF`, and `LLAMA_CPP_CMAKE_ARGS` match the cache manifest. |
+| Model artifacts | `.runtime/local-llm/models/<repo>/...gguf` | The GGUF file exists and optional configured size/checksum checks pass. |
+| Cache manifest | `.runtime/local-llm/cache_manifest.json` | Records runtime build inputs and model artifact metadata. |
+
+Repeated benchmark requests do not reclone llama.cpp, rebuild binaries, or
+redownload GGUF artifacts while this cache persists. Downloads are written to a
+`.partial` file under a filesystem lock and are atomically moved into place only
+after completion. Build and model-artifact locks prevent concurrent workers from
+doing duplicate first-use work for the same cache root.
+
+Worker startup warmup is enabled by default in local mode:
+
+```bash
+LOCAL_LLM_WARMUP_ON_STARTUP=true
+LOCAL_LLM_WARMUP_MODELS=all
+LOCAL_LLM_WARMUP_PRECISION_MODES=INT4
+LOCAL_LLM_WARMUP_REQUIRED=true
 ```
 
-That still does not fit on a 24GB A10G, but it can fit on an 80GB H100 in this
-single-GPU validation matrix.
+With these defaults, the worker builds llama.cpp and downloads each configured
+model's INT4 artifact before it attaches to Temporal and starts accepting
+benchmark activities. Set `LOCAL_LLM_WARMUP_PRECISION_MODES=all` to predownload
+all configured precision artifacts, or set `LOCAL_LLM_WARMUP_MODELS` to a
+comma-separated model/alias list to warm only selected models.
 
-### Capacity And Utilization
+GGUF files are monolithic weight artifacts, so the service cannot split a model
+into a generic "base layer" plus reusable weight layers unless the model format
+and artifact source provide that separation, such as separate LoRA adapters. The
+production cache boundary here is therefore runtime binaries plus one cached
+artifact per model precision.
 
-Target capacity comes from the selected hardware topology:
+### CPU-Only Execution
 
-```text
-available_vram_gb = vram_gb * max(gpu_count, 1)
+The default CMake arguments disable Metal:
+
+```bash
+LLAMA_CPP_CMAKE_ARGS="-DGGML_METAL=OFF -DBUILD_SHARED_LIBS=OFF"
 ```
 
-For the current single-GPU demo profiles, this is usually just the configured
-`vram_gb`. The `gpu_count` field is included so the same calculation can model
-multi-GPU targets later.
+The benchmark command also forces:
 
-The compile result also reports utilization:
-
-```text
-vram_utilization_ratio = required_vram_gb / available_vram_gb
+```bash
+--n-gpu-layers 0
 ```
 
-Example:
+This keeps local execution on CPU even on Apple silicon. Target GPU behavior is
+only represented by the configured hardware topology and artifact-backed VRAM
+simulation.
 
-```text
-Llama-3-70B at INT4 on H100-80GB:
-  required_vram_gb = 41.2
-  available_vram_gb = 80.0
-  vram_utilization_ratio = 41.2 / 80.0 = 0.515
-```
+### Metrics Contract
 
-If `required_vram_gb` is greater than `available_vram_gb`, the compile stage
-stops before the benchmark simulation.
+The benchmark result includes:
 
-### Benchmark Formula
+- `tokens_per_second`: measured llama.cpp generation throughput.
+- `latency_ms`: measured end-to-end subprocess runtime.
+- `output_tokens`: parsed llama.cpp generated-token count.
+- `prompt_eval_tokens_per_second`: parsed prompt-eval throughput when emitted.
+- `model_file_size_gb`: downloaded GGUF file size.
+- `required_vram_gb`, `available_vram_gb`, `vram_utilization_ratio`: simulated
+  target GPU fit metrics based on the real artifact.
 
-Benchmark metrics are only simulated after the compile fit check succeeds. The
-throughput estimate combines five factors:
-
-```text
-tokens_per_second =
-  validation_tps_baseline
-  * (memory_bandwidth_gbps / 900.0)
-  * precision_throughput_multiplier
-  * deterministic_jitter
-  / (size_penalty ** 0.72)
-```
-
-Where:
-
-- `validation_tps_baseline` comes from `src/config/hardware_profiles.json`.
-- `memory_bandwidth_gbps / 900.0` rewards GPUs with higher memory bandwidth.
-- `precision_throughput_multiplier` comes from the selected precision profile.
-- `deterministic_jitter` is a stable hash-based factor from about `0.90` to
-  `1.10`; the same model, GPU, and precision always produce the same value.
-- `size_penalty = max(parameter_count_billion / 8.0, 1.0)`, so larger models
-  reduce expected throughput.
-
-Latency is derived from the simulated throughput and precision mode:
-
-```text
-latency_ms =
-  (900.0 / max(tokens_per_second, 1.0))
-  * 100.0
-  * precision_latency_multiplier
-```
-
-The accuracy score is not computed from benchmark output. It is the configured
-quality score for the precision mode:
-
-```text
-FP16 = 0.995
-INT8 = 0.975
-INT4 = 0.935
-```
-
-This captures the intended tradeoff in the POC: lower precision reduces VRAM
-and improves simulated throughput/latency, while carrying a lower quality score.
-
-### Worked Benchmark Example
-
-For `Llama-3-70B` on `H100-80GB` with `INT4`:
-
-```text
-parameter_count_billion = 70
-bytes_per_parameter = 0.5
-required_vram_gb = (70 * 0.5 * 1.12) + 2.0 = 41.2
-available_vram_gb = 80.0
-vram_utilization_ratio = 0.515
-```
-
-The H100 profile contributes:
-
-```text
-validation_tps_baseline = 1450
-memory_bandwidth_gbps = 3350
-bandwidth_factor = 3350 / 900 = 3.72
-precision_throughput_multiplier = 2.35
-size_penalty = 70 / 8 = 8.75
-precision_latency_multiplier = 0.46
-```
-
-Using the deterministic jitter for this model, GPU, and precision, the simulated
-benchmark result is:
-
-```text
-tokens_per_second = 2915.04
-latency_ms = 14.20
-accuracy_score = 0.935
-```
-
-These numbers are deterministic validation-matrix estimates, not measurements
-from a physical GPU.
-
-### Failure Contract
-
-When required VRAM is greater than target capacity, the compile stage fails with:
+When required target VRAM is greater than target capacity, the compile stage
+fails with:
 
 ```text
 VRAM_INSUFFICIENT_EXCEPTION
 ```
 
-The failure result includes:
-
-- `error_code`
-- `stage`
-- `reason`
-- `model_name`
-- `target_gpu`
-- `required_vram_gb`
-- `available_vram_gb`
-- `vram_utilization_ratio`
-- `precision_mode`
-
-The worker records this in `llm_gpu_benchmarking_failures_total` with labels similar to:
+The worker records this in `llm_gpu_benchmarking_failures_total` with labels
+similar to:
 
 ```text
-stage="compile", reason="oom", model="Llama-3-70B"
+stage="compile", reason="oom", model="Qwen/Qwen2.5-0.5B-Instruct-GGUF"
 ```
+
+### Explicit Matrix Mode
+
+The deterministic validation matrix still exists for fast tests and legacy demo
+traffic:
+
+```bash
+LLM_GPU_BENCHMARKING_VALIDATION_MODE=matrix
+```
+
+Matrix mode does not download a model or run inference. It should not be used as
+the production-like local benchmark path.
 
 ## Profiles
 
@@ -550,14 +497,20 @@ src/config/hardware_profiles.json
 src/config/deployment_targets.json
 ```
 
-### Model Profiles
+### Local Model Profiles
+
+```text
+src/config/local_llm_profiles.json
+```
+
+### Hosted NIM Model Profiles
 
 ```text
 src/config/model_profiles.json
 ```
 
-Unknown hardware and deployment labels are rejected instead of silently falling
-back to a generic target.
+Unknown hardware, deployment, and local model labels are rejected instead of
+silently falling back to a generic target.
 
 ## Distributed Execution Design
 
@@ -640,11 +593,13 @@ Key metrics:
 | `llm_gpu_benchmarking_pipeline_duration_seconds` | Histogram | `stage`, `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Tracks stage duration from ingest through publish/failure. |
 | `llm_gpu_benchmarking_failures_total` | Counter | `stage`, `reason`, `model` | Counts high-signal failures such as compile OOM. |
 | `llm_gpu_benchmarking_active_workers` | Gauge | none | Tracks currently active worker jobs per worker process. |
-| `llm_gpu_benchmarking_validation_matrix_benchmark_tps` | Histogram | `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Precision-aware validation throughput. |
-| `llm_gpu_benchmarking_validation_matrix_benchmark_latency_ms` | Histogram | `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Precision-aware validation latency. |
-| `llm_gpu_benchmarking_vram_required_gb` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Estimated model VRAM requirement. |
+| `llm_gpu_benchmarking_local_llm_benchmark_tps` | Histogram | `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Measured local llama.cpp generation throughput. |
+| `llm_gpu_benchmarking_local_llm_benchmark_latency_ms` | Histogram | `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Measured local llama.cpp end-to-end latency. |
+| `llm_gpu_benchmarking_validation_matrix_benchmark_tps` | Histogram | `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Matrix-mode simulated throughput. |
+| `llm_gpu_benchmarking_validation_matrix_benchmark_latency_ms` | Histogram | `model_name`, `target_gpu`, `target_environment`, `precision_mode`, `status` | Matrix-mode simulated latency. |
+| `llm_gpu_benchmarking_vram_required_gb` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Required target VRAM. In local mode, this is simulated from the real GGUF artifact size. |
 | `llm_gpu_benchmarking_vram_capacity_gb` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Target VRAM capacity. |
-| `llm_gpu_benchmarking_validation_matrix_accuracy_score` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Simulated precision-mode quality score. |
+| `llm_gpu_benchmarking_validation_matrix_accuracy_score` | Gauge | `model_name`, `target_gpu`, `precision_mode` | Matrix-mode simulated precision quality score. |
 
 Provisioned dashboard:
 
@@ -652,15 +607,16 @@ Provisioned dashboard:
 deploy/monitoring/grafana/dashboards/dashboard.json
 ```
 
-The dashboard combines benchmark-level and validation-matrix panels in one view.
+The dashboard combines benchmark-level, local-runtime, and matrix-mode panels in
+one view.
 It is designed to answer:
 
 - How many benchmark runs succeeded or failed?
 - Which models, hardware targets, and environments are being exercised?
 - Which pipeline stages are bottlenecks?
 - Are failures mostly compile-time VRAM failures or benchmark failures?
-- How do `FP16`, `INT8`, and `INT4` affect throughput, latency, VRAM, and
-  accuracy?
+- How do `FP16`, `INT8`, and `INT4` affect measured local throughput, latency,
+  and simulated target VRAM?
 - How many worker jobs are active during a load test?
 
 ## Service URLs
@@ -691,6 +647,7 @@ Install these tools before running the local production-like paths:
 | `helm` | Kubernetes chart install and upgrade |
 | `jq` | Command-line JSON output formatting in lifecycle tests and examples |
 | Python 3.12+ | Unit tests and load generator |
+| `git`, `cmake`, and a C/C++ compiler | First-use llama.cpp source checkout and build in local validation mode |
 
 ## Local Kubernetes Run
 
@@ -762,7 +719,7 @@ Submit a request through ingress:
 ```bash
 curl -sS -X POST "${BASE_URL}/benchmarks" \
   -H "Content-Type: application/json" \
-  -d '{"model_name":"Llama-3-70B","target_gpu":"H100-80GB","target_environment":"kubernetes","precision_mode":"INT4"}' \
+  -d '{"model_name":"Qwen/Qwen2.5-0.5B-Instruct-GGUF","target_gpu":"A10G-24GB","target_environment":"kubernetes","precision_mode":"INT4"}' \
   | jq .
 ```
 
@@ -788,30 +745,30 @@ source .runtime.env
 echo "${BASE_URL}"
 ```
 
-Successful fit with INT4 on H100:
+Successful local INT4 run on A10G:
 
 ```bash
 curl -sS -X POST "${BASE_URL}/benchmarks" \
   -H "Content-Type: application/json" \
-  -d '{"model_name":"Llama-3-70B","target_gpu":"H100-80GB","target_environment":"kubernetes","precision_mode":"INT4"}' \
+  -d '{"model_name":"Qwen/Qwen2.5-0.5B-Instruct-GGUF","target_gpu":"A10G-24GB","target_environment":"kubernetes","precision_mode":"INT4"}' \
   | jq .
 ```
 
-Intentional VRAM failure with FP16 on A10G:
+Same local model with INT8 on H100:
 
 ```bash
 curl -sS -X POST "${BASE_URL}/benchmarks" \
   -H "Content-Type: application/json" \
-  -d '{"model_name":"Llama-3-70B","target_gpu":"A10G-24GB","target_environment":"kubernetes","precision_mode":"FP16"}' \
+  -d '{"model_name":"Qwen/Qwen2.5-0.5B-Instruct-GGUF","target_gpu":"H100-80GB","target_environment":"kubernetes","precision_mode":"INT8"}' \
   | jq .
 ```
 
-Demo model on GB200:
+Intentional local configuration failure with an unconfigured model:
 
 ```bash
 curl -sS -X POST "${BASE_URL}/benchmarks" \
   -H "Content-Type: application/json" \
-  -d '{"model_name":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","target_gpu":"NVIDIA GB200","target_environment":"kubernetes","precision_mode":"INT8"}' \
+  -d '{"model_name":"Llama-3-70B","target_gpu":"A10G-24GB","target_environment":"kubernetes","precision_mode":"INT4"}' \
   | jq .
 ```
 
@@ -841,14 +798,14 @@ BASE_URL=http://custom-host.localhost ./scripts/load-test.sh test
 After the local Kubernetes ingress path is running:
 
 ```bash
-REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
+REQUESTS=5 CONCURRENCY=1 ./scripts/load-test.sh
 ```
 
 The load test command reads `.runtime.env` automatically. Override `BASE_URL`
 only when needed:
 
 ```bash
-BASE_URL=http://custom-host.localhost REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
+BASE_URL=http://custom-host.localhost REQUESTS=5 CONCURRENCY=1 ./scripts/load-test.sh
 ```
 
 ## Optional Hosted NIM Validation
@@ -877,8 +834,23 @@ Runtime environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LLM_GPU_BENCHMARKING_VALIDATION_MODE` | `validation` | `validation` for deterministic local validation, `hosted` for NVIDIA hosted calls. |
+| `LLM_GPU_BENCHMARKING_VALIDATION_MODE` | `local` | `local` for llama.cpp validation, `hosted` for NVIDIA hosted calls, `matrix` for deterministic test/demo mode. |
 | `LLM_GPU_BENCHMARKING_MINIMUM_TPS_THRESHOLD` | `100` in `.env.example` | Minimum TPS required for publish routing. |
+| `LLM_GPU_BENCHMARKING_LOCAL_LLM_ROOT` | `.runtime/local-llm` | Runtime cache for llama.cpp source/build outputs and downloaded GGUF artifacts. |
+| `LLM_GPU_BENCHMARKING_LOCAL_LLM_PROFILES_PATH` | `src/config/local_llm_profiles.json` | Local model profile manifest. |
+| `LLAMA_CPP_REPO_URL` | `https://github.com/ggml-org/llama.cpp.git` | llama.cpp source repository. |
+| `LLAMA_CPP_GIT_REF` | `master` | llama.cpp branch, tag, or ref to build. Pin this for repeatable production runs. |
+| `LLAMA_CPP_CMAKE_ARGS` | `-DGGML_METAL=OFF -DBUILD_SHARED_LIBS=OFF` | CMake flags; default disables Metal for CPU-only local execution. |
+| `LLAMA_CPP_BUILD_JOBS` | `8` in `.env.example`, `4` in Helm | Parallel build jobs for llama.cpp. |
+| `LLAMA_CPP_THREADS` | `8` in `.env.example`, `4` in Helm | CPU threads passed to `llama-cli`. |
+| `LLAMA_CPP_BENCH_REPETITIONS` | `1` | Repetitions passed to `llama-bench`; raise for more stable metrics. |
+| `LOCAL_LLM_DOWNLOAD_TIMEOUT_SECONDS` | `1800` | Timeout for first-use GGUF artifact download. |
+| `LOCAL_LLM_BENCHMARK_TIMEOUT_SECONDS` | `900` | Timeout for local llama.cpp inference command. |
+| `LOCAL_LLM_CA_BUNDLE` | `certifi` CA bundle | Optional CA bundle override for Hugging Face downloads. |
+| `LOCAL_LLM_WARMUP_ON_STARTUP` | `true` | Build/download the configured local runtime cache before the worker accepts Temporal work. |
+| `LOCAL_LLM_WARMUP_MODELS` | `all` | Comma-separated model names/aliases to warm, or `all`/`none`. |
+| `LOCAL_LLM_WARMUP_PRECISION_MODES` | `INT4` | Comma-separated precision modes to warm, or `all`. |
+| `LOCAL_LLM_WARMUP_REQUIRED` | `true` | Fail worker startup if warmup fails. Set `false` for best-effort warmup. |
 | `NIM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | Base URL for hosted OpenAI-compatible validation. |
 | `NVIDIA_API_KEY` | empty | Bearer token for hosted validation. |
 | `NIM_TIMEOUT_SECONDS` | `30` | HTTP timeout for hosted validation. |
@@ -895,9 +867,10 @@ The unit tests cover:
 
 - Hardware profile matching.
 - Deployment target matching.
+- Local llama.cpp backend selection and compile/benchmark delegation.
 - Hosted runtime client request and response handling.
-- Validation matrix VRAM failure behavior.
-- Precision-mode effects on VRAM, throughput, and accuracy.
+- Explicit matrix-mode VRAM failure behavior.
+- Precision-mode effects in the explicit matrix backend.
 - LangGraph success/failure routing.
 - Pipeline failure message construction.
 
@@ -921,7 +894,8 @@ The current project has local production-like structure in these areas:
 - Workflow orchestration separated from API serving.
 - Worker-process execution for long-running stages.
 - Config-backed hardware and deployment profiles.
-- Deterministic validation failures with specific error codes.
+- Real local GGUF inference through llama.cpp with CPU-only execution.
+- Specific validation failures with stable error codes.
 - High-signal Prometheus metrics and a Grafana dashboard definition.
 - Kubernetes chart for API, worker, Temporal demo components, services, and
   ingress.
@@ -939,8 +913,8 @@ still required:
 - Persist run records, pipeline summaries, and artifacts in a database or object
   store outside Temporal history.
 - Integrate real GPU inventory and scheduler data instead of static JSON.
-- Replace simulated compile/publish steps with actual model-service build,
-  artifact, and deployment workflows.
+- Replace simulated target GPU scheduling and publish steps with actual GPU
+  inventory, model-service artifacts, and deployment workflows.
 - Add secrets management for API keys and runtime credentials.
 - Add structured logging, request IDs, tracing, and alerting.
 - Add CI to run tests, linting, JSON validation, and container builds.

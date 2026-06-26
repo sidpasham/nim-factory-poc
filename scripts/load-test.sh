@@ -38,11 +38,11 @@ else
 fi
 
 test_run() {
-  MODEL_NAME="${MODEL_NAME:-Llama-3-70B}"
-  TARGET_GPU="${TARGET_GPU:-H100-80GB}"
+  MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-0.5B-Instruct-GGUF}"
+  TARGET_GPU="${TARGET_GPU:-A10G-24GB}"
   TARGET_ENVIRONMENT="${TARGET_ENVIRONMENT:-kubernetes}"
   PRECISION_MODE="${PRECISION_MODE:-INT4}"
-  TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-120}"
+  TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-1800}"
 
   echo "Using BASE_URL=${BASE_URL}"
   echo "Health check: ${BASE_URL}/health"
@@ -80,8 +80,8 @@ test_run() {
 }
 
 load_run() {
-  REQUESTS="${REQUESTS:-30}"
-  CONCURRENCY="${CONCURRENCY:-6}"
+  REQUESTS="${REQUESTS:-5}"
+  CONCURRENCY="${CONCURRENCY:-1}"
   POLL="${POLL:-true}"
 
   echo "Using BASE_URL=${BASE_URL}"

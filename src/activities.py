@@ -3,13 +3,19 @@ from typing import Any, Dict
 
 from temporalio import activity
 
-from benchmark_graph import PUBLISH_STATUS, llm_gpu_benchmarking_graph_pipeline
+from benchmark_graph import (
+    PUBLISH_STATUS,
+    llm_gpu_benchmarking_graph_pipeline,
+    minimum_tps_threshold,
+)
 from metrics import (
     ACTIVE_WORKERS,
     BENCHMARK_FAILURES,
     BENCHMARK_PIPELINE_RUNS,
     INFERENCE_LATENCY_GAUGE,
     INFERENCE_THROUGHPUT_GAUGE,
+    LOCAL_LLM_BENCHMARK_LATENCY_MS,
+    LOCAL_LLM_BENCHMARK_THROUGHPUT_TPS,
     MODEL_ACCURACY_SCORE,
     PIPELINE_DURATION_SECONDS,
     VALIDATION_MATRIX_BENCHMARK_LATENCY_MS,
@@ -25,15 +31,33 @@ LOGGER = logging.getLogger(__name__)
 def _failure_stage_and_reason(final_output: Dict[str, Any]) -> tuple[str, str]:
     compile_result = final_output.get("compile_result", {})
     validation_results = final_output.get("validation_results", {})
-    return (
-        compile_result.get("stage")
-        or validation_results.get("stage")
-        or "benchmark",
-        compile_result.get("reason")
-        or validation_results.get("reason")
-        or validation_results.get("error_code")
-        or "validation_failed",
-    )
+    validation_metrics = validation_results.get("metrics", {})
+
+    if compile_result.get("success") is False or compile_result.get("error_code"):
+        return (
+            compile_result.get("stage") or "compile",
+            compile_result.get("error_code")
+            or compile_result.get("reason")
+            or "compile_failed",
+        )
+
+    if validation_results.get("success") is False:
+        return (
+            validation_results.get("stage") or "benchmark",
+            validation_results.get("error_code")
+            or validation_results.get("reason")
+            or "validation_failed",
+        )
+
+    tokens_per_second = validation_metrics.get("tokens_per_second")
+    if tokens_per_second is not None:
+        try:
+            if float(tokens_per_second) <= minimum_tps_threshold():
+                return "benchmark", "throughput_below_threshold"
+        except (TypeError, ValueError):
+            return "benchmark", "invalid_throughput_metric"
+
+    return "benchmark", "validation_failed"
 
 
 def _record_stage_durations(final_output: Dict[str, Any], status_outcome: str) -> None:
@@ -122,6 +146,7 @@ async def execute_compilation_and_validation(state: dict) -> dict:
         validation_results = final_output.get("validation_results", {})
         metrics = validation_results.get("metrics", {})
         precision_mode = final_output.get("precision_mode", "FP16")
+        backend = validation_results.get("backend", "unknown")
 
         tps_metric = metrics.get("tokens_per_second", 0)
         if tps_metric > 0:
@@ -131,13 +156,22 @@ async def execute_compilation_and_validation(state: dict) -> dict:
                 target_environment=final_output["target_environment"],
                 status=status_outcome,
             ).observe(tps_metric)
-            VALIDATION_MATRIX_BENCHMARK_THROUGHPUT_TPS.labels(
-                model_name=final_output["model_name"],
-                target_gpu=final_output["target_gpu"],
-                target_environment=final_output["target_environment"],
-                precision_mode=precision_mode,
-                status=status_outcome,
-            ).observe(tps_metric)
+            if backend == "local_llama_cpp":
+                LOCAL_LLM_BENCHMARK_THROUGHPUT_TPS.labels(
+                    model_name=final_output["model_name"],
+                    target_gpu=final_output["target_gpu"],
+                    target_environment=final_output["target_environment"],
+                    precision_mode=precision_mode,
+                    status=status_outcome,
+                ).observe(tps_metric)
+            elif backend == "validation_matrix":
+                VALIDATION_MATRIX_BENCHMARK_THROUGHPUT_TPS.labels(
+                    model_name=final_output["model_name"],
+                    target_gpu=final_output["target_gpu"],
+                    target_environment=final_output["target_environment"],
+                    precision_mode=precision_mode,
+                    status=status_outcome,
+                ).observe(tps_metric)
 
         latency_metric = metrics.get("latency_ms", 0)
         if latency_metric > 0:
@@ -147,13 +181,22 @@ async def execute_compilation_and_validation(state: dict) -> dict:
                 target_environment=final_output["target_environment"],
                 status=status_outcome,
             ).observe(latency_metric)
-            VALIDATION_MATRIX_BENCHMARK_LATENCY_MS.labels(
-                model_name=final_output["model_name"],
-                target_gpu=final_output["target_gpu"],
-                target_environment=final_output["target_environment"],
-                precision_mode=precision_mode,
-                status=status_outcome,
-            ).observe(latency_metric)
+            if backend == "local_llama_cpp":
+                LOCAL_LLM_BENCHMARK_LATENCY_MS.labels(
+                    model_name=final_output["model_name"],
+                    target_gpu=final_output["target_gpu"],
+                    target_environment=final_output["target_environment"],
+                    precision_mode=precision_mode,
+                    status=status_outcome,
+                ).observe(latency_metric)
+            elif backend == "validation_matrix":
+                VALIDATION_MATRIX_BENCHMARK_LATENCY_MS.labels(
+                    model_name=final_output["model_name"],
+                    target_gpu=final_output["target_gpu"],
+                    target_environment=final_output["target_environment"],
+                    precision_mode=precision_mode,
+                    status=status_outcome,
+                ).observe(latency_metric)
 
         if status_outcome != PUBLISH_STATUS:
             failure_stage, failure_reason = _failure_stage_and_reason(final_output)

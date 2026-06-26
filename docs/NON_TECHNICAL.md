@@ -6,9 +6,10 @@ This proof of concept shows how an AI platform could decide whether a large
 language model is ready to run on a selected hardware target.
 
 A user submits a model, a hardware choice, a deployment environment, and a
-precision mode. The system checks whether the model is likely to fit, runs a
-simulated benchmark, records the result, and shows operational signals in a
-dashboarding.
+precision mode. The default system builds llama.cpp, downloads a real local
+GGUF model, runs CPU-only inference, records measured speed and latency, and
+shows operational signals in dashboarding. Target GPU memory is simulated
+because this local machine does not have the requested datacenter GPU.
 
 The important change is that the demo no longer treats every request as a
 success. If someone tries to place a very large model on hardware with too
@@ -26,10 +27,13 @@ In plain language, the system acts like a benchmark intake desk for AI models:
 
 1. A user asks to prepare a model for a target environment.
 2. The system checks the selected hardware profile.
-3. The system estimates how much GPU memory the model needs.
-4. The system adjusts that estimate based on precision mode.
-5. The system decides whether the model can fit.
-6. The system records success, failure, speed, latency, and resource use.
+3. The system builds or reuses llama.cpp.
+4. The system downloads the configured GGUF model artifact for the selected
+   precision mode.
+5. The system simulates whether the target GPU has enough memory for that real
+   artifact.
+6. The system runs local CPU-only inference and records success, failure, speed,
+   latency, and resource use.
 7. The dashboard shows what happened across many requests.
 
 ## Why This Matters
@@ -44,18 +48,21 @@ Example:
 - The failure should be visible in logs, API status, Prometheus metrics, and
   Grafana dashboards.
 
-This is the behavior the validation matrix provides.
+This is the behavior the local validation backend provides without pretending to
+use a physical GPU.
 
 ## Key Terms
 
 | Term | Meaning |
 | --- | --- |
 | LLM GPU benchmarking | A control plane that prepares model-serving deployments. |
-| Model | The AI model a user wants to serve, such as `Llama-3-70B`. |
+| Model | The configured AI model a user wants to serve, such as `Qwen/Qwen2.5-0.5B-Instruct-GGUF`. |
 | Target hardware | The GPU profile the user wants to run on, such as `H100-80GB` or `A10G-24GB`. |
 | VRAM | GPU memory. Large models need enough VRAM to load and run. |
 | Precision mode | The memory and speed profile selected for the model: `FP16`, `INT8`, or `INT4`. |
-| Validation matrix | A deterministic compatibility check between model size, precision mode, and hardware capacity. |
+| llama.cpp | The open-source local runtime built by the worker to run GGUF models. |
+| GGUF | The local model file format used by llama.cpp. |
+| Target GPU simulation | The memory-fit check for the requested GPU profile when no physical GPU is available. |
 | Temporal | The workflow engine that keeps long-running benchmark work separate from the API request. |
 | Prometheus | The metrics collector. |
 | Grafana | The dashboard used to view metrics. |
@@ -66,42 +73,20 @@ Every request can include:
 
 | Choice | Example | Why it matters |
 | --- | --- | --- |
-| Model | `Llama-3-70B` | Bigger models need more GPU memory. |
+| Model | `Qwen/Qwen2.5-0.5B-Instruct-GGUF` | Must match a configured local GGUF profile. |
 | Hardware | `A10G-24GB` | Smaller GPUs have less memory and lower expected throughput. |
 | Environment | `kubernetes` | Labels the target platform for routing and reporting. |
-| Precision mode | `FP16`, `INT8`, or `INT4` | Lower precision usually needs less memory and can run faster, with a simulated quality tradeoff. |
+| Precision mode | `FP16`, `INT8`, or `INT4` | Selects the configured local GGUF artifact. |
 
 ## Example Outcomes
-
-### Expected Failure
-
-Request:
-
-```text
-Model: Llama-3-70B
-Hardware: A10G-24GB
-Precision mode: FP16
-```
-
-Outcome:
-
-```text
-Failed
-Reason: VRAM_INSUFFICIENT_EXCEPTION
-```
-
-Why:
-
-The model needs about 158.8GB of GPU memory in this demo's estimate, but the
-target card has 24GB.
 
 ### Expected Success
 
 Request:
 
 ```text
-Model: Llama-3-70B
-Hardware: H100-80GB
+Model: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+Hardware: A10G-24GB
 Precision mode: INT4
 ```
 
@@ -113,8 +98,30 @@ Ready to deploy in the demo pipeline
 
 Why:
 
-The lower precision mode reduces the estimated memory footprint enough to fit on
-the H100 profile.
+The worker downloads a small real Qwen GGUF artifact, runs it locally with
+llama.cpp, and the simulated target GPU has enough configured VRAM.
+
+### Expected Failure
+
+Request:
+
+```text
+Model: Llama-3-70B
+Hardware: A10G-24GB
+Precision mode: INT4
+```
+
+Outcome:
+
+```text
+Failed
+Reason: local model is not configured
+```
+
+Why:
+
+The production-like local path does not silently substitute the configured Qwen
+model for an unconfigured Llama label.
 
 ## What The Dashboard Shows
 
@@ -140,7 +147,7 @@ are busy, and where bottlenecks appear.
 | Temporal | Tracks the long-running workflow. |
 | Worker | Executes the model validation pipeline away from the API process. |
 | LangGraph | Defines the benchmark stages and routing logic. |
-| Validation matrix | Makes the fit/fail decision based on model size, hardware memory, and precision mode. |
+| Local LLM runtime | Builds llama.cpp, downloads GGUF artifacts, runs CPU-only inference, and parses metrics. |
 | Prometheus | Collects metrics from the API and worker. |
 | Grafana | Shows dashboards from those metrics. |
 
@@ -152,16 +159,16 @@ Real in this POC:
 - Background workflow execution.
 - Worker process separation.
 - Config-backed hardware and deployment profiles.
-- Deterministic validation decisions.
+- Real local GGUF inference through llama.cpp.
 - Metrics and dashboard definitions.
 - Local Kubernetes Helm run.
 
 Simulated in this POC:
 
 - Real GPU provisioning.
-- Real model compilation.
 - Real artifact publishing.
-- Real hardware benchmark execution in the default mode.
+- Physical target-GPU benchmark execution.
+- Target GPU memory and topology.
 
 Optional:
 
@@ -179,7 +186,7 @@ Start the local Kubernetes stack:
 Submit a few requests:
 
 ```bash
-REQUESTS=30 CONCURRENCY=6 ./scripts/load-test.sh
+REQUESTS=5 CONCURRENCY=1 ./scripts/load-test.sh
 ```
 
 Open:

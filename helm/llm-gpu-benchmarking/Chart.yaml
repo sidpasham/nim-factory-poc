@@ -1,6 +1,6 @@
 apiVersion: v2
 name: llm-gpu-benchmarking
-description: LLM GPU Benchmarking control-plane POC for real NVIDIA hosted NIM validation.
+description: LLM GPU Benchmarking control-plane POC with local llama.cpp validation and optional hosted NIM validation.
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

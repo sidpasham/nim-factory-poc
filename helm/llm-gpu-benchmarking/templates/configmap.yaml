@@ -9,5 +9,19 @@ data:
   NIM_BASE_URL: {{ .Values.config.nimBaseUrl | quote }}
   NIM_TIMEOUT_SECONDS: {{ .Values.config.nimTimeoutSeconds | quote }}
   LLM_GPU_BENCHMARKING_VALIDATION_MODE: {{ .Values.config.validationMode | quote }}
+  LLM_GPU_BENCHMARKING_LOCAL_LLM_ROOT: {{ .Values.config.localLlmRoot | quote }}
+  LLM_GPU_BENCHMARKING_LOCAL_LLM_PROFILES_PATH: {{ .Values.config.localLlmProfilesPath | quote }}
+  LLAMA_CPP_REPO_URL: {{ .Values.config.llamaCppRepoUrl | quote }}
+  LLAMA_CPP_GIT_REF: {{ .Values.config.llamaCppGitRef | quote }}
+  LLAMA_CPP_CMAKE_ARGS: {{ .Values.config.llamaCppCmakeArgs | quote }}
+  LLAMA_CPP_BUILD_JOBS: {{ .Values.config.llamaCppBuildJobs | quote }}
+  LLAMA_CPP_THREADS: {{ .Values.config.llamaCppThreads | quote }}
+  LLAMA_CPP_BENCH_REPETITIONS: {{ .Values.config.llamaCppBenchRepetitions | quote }}
+  LOCAL_LLM_DOWNLOAD_TIMEOUT_SECONDS: {{ .Values.config.localLlmDownloadTimeoutSeconds | quote }}
+  LOCAL_LLM_BENCHMARK_TIMEOUT_SECONDS: {{ .Values.config.localLlmBenchmarkTimeoutSeconds | quote }}
+  LOCAL_LLM_WARMUP_ON_STARTUP: {{ .Values.config.localLlmWarmupOnStartup | quote }}
+  LOCAL_LLM_WARMUP_MODELS: {{ .Values.config.localLlmWarmupModels | quote }}
+  LOCAL_LLM_WARMUP_PRECISION_MODES: {{ .Values.config.localLlmWarmupPrecisionModes | quote }}
+  LOCAL_LLM_WARMUP_REQUIRED: {{ .Values.config.localLlmWarmupRequired | quote }}
   TEMPORAL_ADDRESS: {{ default (printf "%s-temporal:7233" (include "llm-gpu-benchmarking.fullname" .)) .Values.config.temporalAddress | quote }}
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
