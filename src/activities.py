@@ -121,6 +121,42 @@ def _record_validation_resource_metrics(final_output: Dict[str, Any]) -> None:
         ).set(accuracy_score)
 
 
+def _build_pipeline_summary(
+    final_output: Dict[str, Any],
+    metrics: Dict[str, Any],
+    status_outcome: str,
+) -> Dict[str, Any]:
+    precision_mode = final_output.get("precision_mode", "FP16")
+    evaluated_target = {
+        "target_gpu": final_output["target_gpu"],
+        "target_environment": final_output["target_environment"],
+        "precision_mode": precision_mode,
+    }
+    deployable = status_outcome == PUBLISH_STATUS
+
+    return {
+        "model": final_output["model_name"],
+        "hardware": final_output["target_gpu"],
+        "target_gpu": final_output["target_gpu"],
+        "environment": final_output["target_environment"],
+        "precision_mode": precision_mode,
+        "evaluated_target": evaluated_target,
+        "deployable_on": evaluated_target if deployable else None,
+        "topology_used": final_output["hardware_topology"],
+        "deployment_target": final_output["deployment_target"],
+        "precision": final_output.get(
+            "precision_result",
+            {"profiled": False},
+        ),
+        "compile_result": final_output.get("compile_result", {}),
+        "test_metrics": metrics,
+        "stage_durations": final_output.get("stage_durations", {}),
+        "final_status": status_outcome,
+        "deployable": deployable,
+        "error_log": final_output.get("error_message", ""),
+    }
+
+
 @activity.defn
 async def execute_compilation_and_validation(state: dict) -> dict:
     """Runs the staged LangGraph pipeline inside a Temporal worker activity."""
@@ -209,24 +245,7 @@ async def execute_compilation_and_validation(state: dict) -> dict:
         _record_stage_durations(final_output, status_outcome)
         _record_validation_resource_metrics(final_output)
 
-        return {
-            "model": final_output["model_name"],
-            "hardware": final_output["target_gpu"],
-            "environment": final_output["target_environment"],
-            "precision_mode": final_output.get("precision_mode", "FP16"),
-            "topology_used": final_output["hardware_topology"],
-            "deployment_target": final_output["deployment_target"],
-            "precision": final_output.get(
-                "precision_result",
-                {"profiled": False},
-            ),
-            "compile_result": final_output.get("compile_result", {}),
-            "test_metrics": metrics,
-            "stage_durations": final_output.get("stage_durations", {}),
-            "final_status": status_outcome,
-            "deployable": status_outcome == PUBLISH_STATUS,
-            "error_log": final_output.get("error_message", ""),
-        }
+        return _build_pipeline_summary(final_output, metrics, status_outcome)
     except Exception:
         LOGGER.exception("benchmark activity failed unexpectedly")
         raise

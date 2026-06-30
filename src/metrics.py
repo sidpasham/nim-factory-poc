@@ -16,7 +16,7 @@ INFERENCE_THROUGHPUT_GAUGE = Histogram(
 
 INFERENCE_LATENCY_GAUGE = Histogram(
     "llm_gpu_benchmarking_validated_latency_ms",
-    "End-to-end validation latency in milliseconds captured during automated validation phases.",
+    "Validation latency in milliseconds captured during automated validation phases.",
     ["model_name", "target_gpu", "target_environment", "status"],
     buckets=[25, 50, 100, 250, 500, 1000, 2000, 5000, 10000, 30000, 60000],
 )
@@ -44,7 +44,7 @@ LOCAL_LLM_BENCHMARK_THROUGHPUT_TPS = Histogram(
 
 LOCAL_LLM_BENCHMARK_LATENCY_MS = Histogram(
     "llm_gpu_benchmarking_local_llm_benchmark_latency_ms",
-    "Measured local llama.cpp end-to-end inference latency from a downloaded GGUF model.",
+    "Measured local llama.cpp generation latency from llama-bench for a downloaded GGUF model.",
     ["model_name", "target_gpu", "target_environment", "precision_mode", "status"],
     buckets=[100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000],
 )

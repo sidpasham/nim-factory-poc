@@ -115,7 +115,7 @@ flowchart TB
     apiMetrics["API metrics<br/>app:8000/metrics"] --> prometheus[Prometheus-compatible scraper]
     workerMetrics["Worker metrics<br/>worker:9000/"] --> prometheus
     prometheus --> grafana[Grafana]
-    dashboardFile[(deploy/monitoring/grafana/dashboards/dashboard.json)] --> grafana
+    dashboardFile[(helm/llm-gpu-benchmarking/dashboards/dashboard.json)] --> grafana
 ```
 
 ## Component Responsibilities
@@ -148,7 +148,7 @@ flowchart TB
 | `Dockerfile` | Application image definition used by API and worker containers. |
 | `.dockerignore` | Root Docker build-context ignore rules. |
 | `helm/llm-gpu-benchmarking/` | Local Kubernetes Helm chart with API, worker, Temporal, service, and ingress resources. |
-| `deploy/monitoring/grafana/` | Provisioned Grafana datasource and dashboard. |
+| `deploy/monitoring/grafana/` | Standalone Grafana provisioning copy for non-Helm monitoring experiments. |
 | `openapi.yaml` | Checked-in API contract. |
 
 Runtime commands use `PYTHONPATH=src` and module names such as `main`,
@@ -248,7 +248,7 @@ Example response:
 
 ```json
 {
-  "message": "Benchmark run initiated.",
+  "message": "Distributed LLM GPU Benchmark run initiated.",
   "workflow_id": "llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4",
   "status_url": "/benchmarks/llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4",
   "precision_mode": "INT4"
@@ -279,8 +279,19 @@ After completion:
   "pipeline_summary": {
     "model": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
     "hardware": "A10G-24GB",
+    "target_gpu": "A10G-24GB",
     "environment": "kubernetes",
     "precision_mode": "INT4",
+    "evaluated_target": {
+      "target_gpu": "A10G-24GB",
+      "target_environment": "kubernetes",
+      "precision_mode": "INT4"
+    },
+    "deployable_on": {
+      "target_gpu": "A10G-24GB",
+      "target_environment": "kubernetes",
+      "precision_mode": "INT4"
+    },
     "final_status": "Model_Service_Ready_To_Deploy",
     "deployable": true,
     "error_log": ""
@@ -450,9 +461,11 @@ simulation.
 The benchmark result includes:
 
 - `tokens_per_second`: measured llama.cpp generation throughput.
-- `latency_ms`: measured end-to-end subprocess runtime.
+- `latency_ms`: parsed `llama-bench` generation latency.
 - `output_tokens`: parsed llama.cpp generated-token count.
 - `prompt_eval_tokens_per_second`: parsed prompt-eval throughput when emitted.
+- `sample_latency_ms`: wall-clock runtime of the separate `llama-cli` sample
+  generation command.
 - `model_file_size_gb`: downloaded GGUF file size.
 - `required_vram_gb`, `available_vram_gb`, `vram_utilization_ratio`: simulated
   target GPU fit metrics based on the real artifact.
@@ -555,6 +568,11 @@ Current Temporal settings:
 - Retry attempts: 3
 - Non-retryable error types: `UnsupportedProvisioningTargetError`, `ValueError`
 
+The local worker warms the llama.cpp build and configured model artifacts before
+accepting work by default. That keeps the five-minute activity timeout focused
+on the compile/fit and benchmark stages instead of first-use source checkout and
+model download.
+
 The local Kubernetes chart uses Temporal development mode for demos. A production
 deployment should use a real Temporal cluster or Temporal Cloud with persistent
 storage, namespace isolation, TLS, and operational runbooks.
@@ -562,8 +580,8 @@ storage, namespace isolation, TLS, and operational runbooks.
 ## Observability Design
 
 The API and worker expose Prometheus-format metrics. In Kubernetes, the chart
-adds scrape annotations so a compatible Prometheus setup can collect both
-targets:
+adds pod scrape annotations and, when `monitoring.enabled=true`, provisions a
+Prometheus instance with static scrape jobs for both targets:
 
 ```mermaid
 flowchart LR
@@ -604,7 +622,7 @@ Key metrics:
 Provisioned dashboard:
 
 ```text
-deploy/monitoring/grafana/dashboards/dashboard.json
+helm/llm-gpu-benchmarking/dashboards/dashboard.json
 ```
 
 The dashboard combines benchmark-level, local-runtime, and matrix-mode panels in
@@ -680,7 +698,7 @@ The script:
 - creates the `llm-gpu-benchmarking` namespace
 - creates the optional `llm-gpu-benchmarking-secrets` secret when `NVIDIA_API_KEY` is set
 - installs or upgrades the Helm release with ingress enabled
-- waits for API, worker, and Temporal deployments to roll out
+- waits for API, worker, Temporal, and optional monitoring deployments to roll out
 - checks API health through ingress
 - writes `.runtime.env` with `BASE_URL=http://llm-gpu-benchmarking.localhost` or your
   custom ingress host
@@ -706,6 +724,19 @@ INGRESS_HOST=llm-gpu-benchmarking.localhost \
 With ingress enabled, Kubernetes keeps the API service as an internal
 `ClusterIP` and exposes HTTP through the cluster ingress controller. This is
 closer to a production shape than binding the pod directly to a laptop port.
+The supported local access path is ingress through
+`llm-gpu-benchmarking.localhost`; a shared production deployment should use an
+ingress controller, load balancer, or service mesh entrypoint.
+
+If `http://llm-gpu-benchmarking.localhost/health` returns `404` or times out
+while pods are ready, fix the local ingress path instead of bypassing it. Check
+the ingress object, ingress class, and controller logs:
+
+```bash
+kubectl -n llm-gpu-benchmarking get ingress,svc,pods
+kubectl get ingressclass
+kubectl -n kube-system logs deploy/traefik --tail=200
+```
 
 Call the API through the URL written by the run script:
 
@@ -855,7 +886,7 @@ Runtime environment variables:
 | `NVIDIA_API_KEY` | empty | Bearer token for hosted validation. |
 | `NIM_TIMEOUT_SECONDS` | `30` | HTTP timeout for hosted validation. |
 | `NIM_MODEL_PROFILES_PATH` | `src/config/model_profiles.json` | Optional model payload profile override. |
-| `TEMPORAL_ADDRESS` | `llm-gpu-benchmarking-temporal:7233` in Helm | Temporal frontend address used by API and worker. |
+| `TEMPORAL_ADDRESS` | `llm-gpu-benchmarking-temporal:7233` in Helm | Temporal frontend address used by API and worker. If local Kubernetes DNS fails, the app also tries Kubernetes service-link env vars such as `LLM_GPU_BENCHMARKING_TEMPORAL_SERVICE_HOST`. |
 | `TEMPORAL_CONNECT_ATTEMPTS` | `3` API, `12` worker | Connection retry attempts at startup. |
 | `METRICS_PORT` | `9000` | Worker metrics listener port. |
 | `MAX_CONCURRENT_ACTIVITIES` | `10` | Worker activity concurrency. |
@@ -873,6 +904,7 @@ The unit tests cover:
 - Precision-mode effects in the explicit matrix backend.
 - LangGraph success/failure routing.
 - Pipeline failure message construction.
+- Temporal connection address fallback candidate handling.
 
 Run:
 

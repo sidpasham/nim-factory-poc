@@ -3,11 +3,11 @@ import logging
 import os
 
 from prometheus_client import start_http_server
-from temporalio.client import Client
 from temporalio.worker import Worker
 
 from activities import execute_compilation_and_validation
 from local_llm_runtime import LocalLLMBenchmarkRunner
+from temporal_connection import connect_temporal_client
 from workflows import LlmGpuBenchmarkingWorkflow
 
 
@@ -17,27 +17,13 @@ VALIDATION_MODE_ENV = "LLM_GPU_BENCHMARKING_VALIDATION_MODE"
 LOCAL_VALIDATION_MODE = "local"
 
 
-async def connect_temporal() -> Client:
-    temporal_address = os.getenv("TEMPORAL_ADDRESS", "temporal:7233")
+async def connect_temporal():
     attempts = int(os.getenv("TEMPORAL_CONNECT_ATTEMPTS", "12"))
-    last_error: Exception | None = None
-
-    for attempt in range(1, attempts + 1):
-        try:
-            return await Client.connect(temporal_address)
-        except Exception as exc:
-            last_error = exc
-            LOGGER.warning(
-                "Temporal connection attempt %s/%s failed: %s",
-                attempt,
-                attempts,
-                exc,
-            )
-            await asyncio.sleep(min(attempt, 5))
-
-    raise RuntimeError(
-        f"failed to connect to Temporal at {temporal_address} after {attempts} attempts"
-    ) from last_error
+    return await connect_temporal_client(
+        default_address="temporal:7233",
+        attempts=attempts,
+        logger=LOGGER,
+    )
 
 
 async def main():

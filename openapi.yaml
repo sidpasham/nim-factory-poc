@@ -94,7 +94,7 @@ paths:
               examples:
                 accepted:
                   value:
-                    message: Benchmark run initiated.
+                    message: Distributed LLM GPU Benchmark run initiated.
                     workflow_id: llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4
                     status_url: /benchmarks/llm-gpu-benchmarking-qwen-qwen2-5-0-5b-instruct-gguf-int4-a1b2c3d4
                     precision_mode: INT4
@@ -152,8 +152,17 @@ paths:
                     pipeline_summary:
                       model: Qwen/Qwen2.5-0.5B-Instruct-GGUF
                       hardware: A10G-24GB
+                      target_gpu: A10G-24GB
                       environment: kubernetes
                       precision_mode: INT4
+                      evaluated_target:
+                        target_gpu: A10G-24GB
+                        target_environment: kubernetes
+                        precision_mode: INT4
+                      deployable_on:
+                        target_gpu: A10G-24GB
+                        target_environment: kubernetes
+                        precision_mode: INT4
                       final_status: Model_Service_Ready_To_Deploy
                       deployable: true
                       error_log: ""
@@ -164,8 +173,14 @@ paths:
                     pipeline_summary:
                       model: Llama-3-70B
                       hardware: A10G-24GB
+                      target_gpu: A10G-24GB
                       environment: kubernetes
                       precision_mode: INT4
+                      evaluated_target:
+                        target_gpu: A10G-24GB
+                        target_environment: kubernetes
+                        precision_mode: INT4
+                      deployable_on: null
                       final_status: Failed
                       deployable: false
                       error_log: "local model 'Llama-3-70B' is not configured."
@@ -267,8 +282,11 @@ components:
       required:
         - model
         - hardware
+        - target_gpu
         - environment
         - precision_mode
+        - evaluated_target
+        - deployable_on
         - final_status
         - deployable
         - error_log
@@ -277,10 +295,21 @@ components:
           type: string
         hardware:
           type: string
+          description: Backward-compatible alias for `target_gpu`.
+        target_gpu:
+          type: string
+          description: GPU target evaluated by the workflow.
         environment:
           type: string
         precision_mode:
           $ref: "#/components/schemas/PrecisionMode"
+        evaluated_target:
+          $ref: "#/components/schemas/BenchmarkTarget"
+        deployable_on:
+          anyOf:
+            - $ref: "#/components/schemas/BenchmarkTarget"
+            - type: "null"
+          description: Target tuple the model is deployable on; null when `deployable` is false.
         topology_used:
           type: object
           additionalProperties: true
@@ -308,6 +337,19 @@ components:
           type: boolean
         error_log:
           type: string
+    BenchmarkTarget:
+      type: object
+      required:
+        - target_gpu
+        - target_environment
+        - precision_mode
+      properties:
+        target_gpu:
+          type: string
+        target_environment:
+          type: string
+        precision_mode:
+          $ref: "#/components/schemas/PrecisionMode"
     PrecisionResult:
       type: object
       properties:
@@ -392,6 +434,7 @@ components:
         latency_ms:
           type: number
           format: double
+          description: Validation latency in milliseconds. In local mode this is parsed from llama-bench generation latency.
         output_tokens:
           type: integer
         prompt_eval_tokens_per_second:
@@ -403,6 +446,7 @@ components:
         sample_latency_ms:
           type: number
           format: double
+          description: Wall-clock runtime of the separate llama-cli sample generation command.
         accuracy_score:
           type: number
           format: double
