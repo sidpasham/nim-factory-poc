@@ -432,6 +432,19 @@ benchmark activities. Set `LOCAL_LLM_WARMUP_PRECISION_MODES=all` to predownload
 all configured precision artifacts, or set `LOCAL_LLM_WARMUP_MODELS` to a
 comma-separated model/alias list to warm only selected models.
 
+First-use warmup is CPU-heavy because it compiles llama.cpp inside the worker
+container. The local defaults keep this conservative for Rancher Desktop:
+
+```bash
+LLAMA_CPP_BUILD_JOBS=2
+LLAMA_CPP_THREADS=2
+MAX_CONCURRENT_ACTIVITIES=1
+```
+
+If the worker log shows `Building llama.cpp binaries`, a submitted workflow can
+remain `RUNNING` until warmup finishes and the worker attaches to Temporal.
+Raise these values only when the local Kubernetes VM has enough spare CPU.
+
 GGUF files are monolithic weight artifacts, so the service cannot split a model
 into a generic "base layer" plus reusable weight layers unless the model format
 and artifact source provide that separation, such as separate LoRA adapters. The
@@ -872,8 +885,8 @@ Runtime environment variables:
 | `LLAMA_CPP_REPO_URL` | `https://github.com/ggml-org/llama.cpp.git` | llama.cpp source repository. |
 | `LLAMA_CPP_GIT_REF` | `master` | llama.cpp branch, tag, or ref to build. Pin this for repeatable production runs. |
 | `LLAMA_CPP_CMAKE_ARGS` | `-DGGML_METAL=OFF -DBUILD_SHARED_LIBS=OFF` | CMake flags; default disables Metal for CPU-only local execution. |
-| `LLAMA_CPP_BUILD_JOBS` | `8` in `.env.example`, `4` in Helm | Parallel build jobs for llama.cpp. |
-| `LLAMA_CPP_THREADS` | `8` in `.env.example`, `4` in Helm | CPU threads passed to `llama-cli`. |
+| `LLAMA_CPP_BUILD_JOBS` | `2` | Parallel build jobs for llama.cpp. |
+| `LLAMA_CPP_THREADS` | `2` | CPU threads passed to `llama-cli` and `llama-bench`. |
 | `LLAMA_CPP_BENCH_REPETITIONS` | `1` | Repetitions passed to `llama-bench`; raise for more stable metrics. |
 | `LOCAL_LLM_DOWNLOAD_TIMEOUT_SECONDS` | `1800` | Timeout for first-use GGUF artifact download. |
 | `LOCAL_LLM_BENCHMARK_TIMEOUT_SECONDS` | `900` | Timeout for local llama.cpp inference command. |
@@ -889,7 +902,7 @@ Runtime environment variables:
 | `TEMPORAL_ADDRESS` | `llm-gpu-benchmarking-temporal:7233` in Helm | Temporal frontend address used by API and worker. If local Kubernetes DNS fails, the app also tries Kubernetes service-link env vars such as `LLM_GPU_BENCHMARKING_TEMPORAL_SERVICE_HOST`. |
 | `TEMPORAL_CONNECT_ATTEMPTS` | `3` API, `12` worker | Connection retry attempts at startup. |
 | `METRICS_PORT` | `9000` | Worker metrics listener port. |
-| `MAX_CONCURRENT_ACTIVITIES` | `10` | Worker activity concurrency. |
+| `MAX_CONCURRENT_ACTIVITIES` | `1` | Worker activity concurrency. |
 | `LOG_LEVEL` | `INFO` | API and worker logging level. |
 
 ## Test Coverage

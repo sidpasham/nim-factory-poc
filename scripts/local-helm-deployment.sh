@@ -110,8 +110,8 @@ up() {
     --set-string "config.llamaCppRepoUrl=${LLAMA_CPP_REPO_URL:-https://github.com/ggml-org/llama.cpp.git}" \
     --set-string "config.llamaCppGitRef=${LLAMA_CPP_GIT_REF:-master}" \
     --set-string "config.llamaCppCmakeArgs=${LLAMA_CPP_CMAKE_ARGS:--DGGML_METAL=OFF -DBUILD_SHARED_LIBS=OFF}" \
-    --set-string "config.llamaCppBuildJobs=${LLAMA_CPP_BUILD_JOBS:-4}" \
-    --set-string "config.llamaCppThreads=${LLAMA_CPP_THREADS:-4}" \
+    --set-string "config.llamaCppBuildJobs=${LLAMA_CPP_BUILD_JOBS:-2}" \
+    --set-string "config.llamaCppThreads=${LLAMA_CPP_THREADS:-2}" \
     --set-string "config.llamaCppBenchRepetitions=${LLAMA_CPP_BENCH_REPETITIONS:-1}" \
     --set-string "config.localLlmDownloadTimeoutSeconds=${LOCAL_LLM_DOWNLOAD_TIMEOUT_SECONDS:-1800}" \
     --set-string "config.localLlmBenchmarkTimeoutSeconds=${LOCAL_LLM_BENCHMARK_TIMEOUT_SECONDS:-900}" \
@@ -120,7 +120,7 @@ up() {
     --set-string "config.localLlmWarmupPrecisionModes=${LOCAL_LLM_WARMUP_PRECISION_MODES:-INT4}" \
     --set-string "config.localLlmWarmupRequired=${LOCAL_LLM_WARMUP_REQUIRED:-true}" \
     --set-string "config.logLevel=${LOG_LEVEL:-INFO}" \
-    --set-string "worker.maxConcurrentActivities=${MAX_CONCURRENT_ACTIVITIES:-10}"
+    --set-string "worker.maxConcurrentActivities=${MAX_CONCURRENT_ACTIVITIES:-1}"
 
   kubectl -n "${NAMESPACE}" rollout status deployment \
     -l "app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=api" \

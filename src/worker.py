@@ -38,7 +38,7 @@ async def main():
         task_queue="llm-gpu-benchmarking-task-queue",
         workflows=[LlmGpuBenchmarkingWorkflow],
         activities=[execute_compilation_and_validation],
-        max_concurrent_activities=int(os.getenv("MAX_CONCURRENT_ACTIVITIES", "10")),
+        max_concurrent_activities=int(os.getenv("MAX_CONCURRENT_ACTIVITIES", "1")),
     )
 
     LOGGER.info("LLM GPU Benchmarking worker attached to Temporal; metrics_port=%s", metrics_port)

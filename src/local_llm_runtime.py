@@ -1,6 +1,7 @@
 import hashlib
 import fcntl
 import json
+import logging
 import os
 import platform
 import re
@@ -24,6 +25,7 @@ from validation_matrix import (
     normalize_precision_mode,
 )
 
+LOGGER = logging.getLogger(__name__)
 
 LOCAL_LLAMA_CPP_SOURCE = "local_llama_cpp"
 CONFIG_DIR = Path(__file__).resolve().parent / "config"
@@ -554,11 +556,24 @@ class LocalLLMBenchmarkRunner:
         ]
 
         start_time = time.perf_counter()
+        LOGGER.info(
+            "Running local llama.cpp sample inference; model=%s precision_mode=%s threads=%s",
+            profile.model_name,
+            precision_mode,
+            threads,
+        )
         sample_completed = self._run(
             sample_command,
             timeout=self.config.benchmark_timeout_seconds,
         )
         sample_elapsed_seconds = max(time.perf_counter() - start_time, 0.001)
+        LOGGER.info(
+            "Running local llama-bench; model=%s precision_mode=%s threads=%s repetitions=%s",
+            profile.model_name,
+            precision_mode,
+            threads,
+            self.config.bench_repetitions,
+        )
         bench_completed = self._run(
             bench_command,
             timeout=self.config.benchmark_timeout_seconds,
@@ -641,6 +656,11 @@ class LocalLLMBenchmarkRunner:
 
             self.config.root_dir.mkdir(parents=True, exist_ok=True)
             if not repo_dir.exists():
+                LOGGER.info(
+                    "Cloning llama.cpp source; repo=%s target=%s",
+                    self.config.repo_url,
+                    repo_dir,
+                )
                 self._run([
                     "git",
                     "clone",
@@ -651,6 +671,7 @@ class LocalLLMBenchmarkRunner:
                 ])
 
             if self.config.repo_ref:
+                LOGGER.info("Checking out llama.cpp ref; ref=%s", self.config.repo_ref)
                 self._run(
                     ["git", "fetch", "--depth", "1", "origin", self.config.repo_ref],
                     cwd=repo_dir,
@@ -664,7 +685,16 @@ class LocalLLMBenchmarkRunner:
                 "-DCMAKE_BUILD_TYPE=Release",
                 *self.config.cmake_args,
             ]
+            LOGGER.info(
+                "Configuring llama.cpp build; path=%s cmake_args=%s",
+                repo_dir,
+                " ".join(self.config.cmake_args),
+            )
             self._run(cmake_configure, cwd=repo_dir)
+            LOGGER.info(
+                "Building llama.cpp binaries; jobs=%s targets=llama-cli,llama-bench",
+                self.config.build_jobs,
+            )
             self._run(
                 [
                     "cmake",
@@ -717,6 +747,12 @@ class LocalLLMBenchmarkRunner:
             if partial_path.exists():
                 partial_path.unlink()
 
+            LOGGER.info(
+                "Downloading local GGUF artifact; repo=%s file=%s target=%s",
+                profile.hf_repo,
+                artifact.filename,
+                model_path,
+            )
             request = urllib.request.Request(
                 url,
                 headers={"User-Agent": "llm-gpu-benchmarking-local-runtime/0.1"},
